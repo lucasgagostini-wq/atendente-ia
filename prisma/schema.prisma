@@ -1,0 +1,176 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum LeadStatus {
+  NEW
+  QUALIFIED
+  NEGOTIATION
+  CONVERTED
+  LOST
+}
+
+enum FunnelStage {
+  COLD
+  WARM
+  HOT
+  CHECKOUT
+  CUSTOMER
+}
+
+enum ConversationStatus {
+  OPEN
+  ARCHIVED
+  CLOSED
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageRole {
+  LEAD
+  ASSISTANT
+  HUMAN
+  SYSTEM
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  AUDIO
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Lead {
+  id             String         @id @default(cuid())
+  name           String?
+  phone          String         @unique
+  status         LeadStatus     @default(NEW)
+  funnelStage    FunnelStage    @default(COLD)
+  source         String?
+  aiEnabled      Boolean        @default(true)
+  humanTakeover  Boolean        @default(false)
+  summary        String?
+  interest       String?
+  objections     Json?
+  lastMessage    String?
+  lastMessageAt  DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  conversations  Conversation[]
+  messages       Message[]
+  leadTags       LeadTag[]
+}
+
+model Conversation {
+  id        String             @id @default(cuid())
+  leadId    String
+  status    ConversationStatus @default(OPEN)
+  createdAt DateTime           @default(now())
+  updatedAt DateTime           @updatedAt
+  lead      Lead               @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  messages  Message[]
+}
+
+model Message {
+  id             String           @id @default(cuid())
+  conversationId String
+  leadId         String
+  direction      MessageDirection
+  role           MessageRole
+  type           MessageType      @default(TEXT)
+  content        String
+  metadata       Json?
+  createdAt      DateTime         @default(now())
+  conversation   Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  lead           Lead             @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([leadId, createdAt])
+}
+
+model Prompt {
+  id               String   @id @default(cuid())
+  name             String   @default("Prompt Principal")
+  personality      String
+  tone             String
+  goal             String
+  rules            String
+  faq              String
+  objections       String
+  offer            String
+  checkoutUrl      String?
+  transferTriggers String
+  cta              String
+  isActive         Boolean  @default(true)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+}
+
+model Automation {
+  id           String   @id @default(cuid())
+  name         String
+  trigger      String
+  message      String
+  delayMinutes Int
+  active       Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+model Tag {
+  id       String    @id @default(cuid())
+  name     String    @unique
+  color    String
+  createdAt DateTime @default(now())
+  leadTags LeadTag[]
+}
+
+model LeadTag {
+  leadId String
+  tagId  String
+  lead   Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  tag    Tag  @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([leadId, tagId])
+}
+
+model Settings {
+  id                    String   @id @default("default")
+  evolutionApiUrl       String?
+  evolutionApiKey       String?
+  evolutionInstanceName String?
+  webhookUrl            String?
+  openRouterApiKey      String?
+  openRouterModel       String   @default("deepseek/deepseek-chat")
+  temperature           Float    @default(0.6)
+  minDelaySeconds       Int      @default(2)
+  maxDelaySeconds       Int      @default(8)
+  safeMode              Boolean  @default(true)
+  defaultCheckoutUrl    String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
+model Log {
+  id        String   @id @default(cuid())
+  type      String
+  message   String
+  payload   Json?
+  createdAt DateTime @default(now())
+}
+
