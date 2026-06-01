@@ -46,13 +46,33 @@ export async function PATCH(request: Request, context: Context) {
       aiEnabled: parsed.data.aiEnabled,
       humanTakeover: parsed.data.humanTakeover,
       summary: toNullable(parsed.data.summary),
-    });
+      interest: toNullable(parsed.data.interest),
+    }, parsed.data.tagIds);
 
     return NextResponse.json(lead);
   } catch (error) {
     return NextResponse.json(
       {
         error: "Falha ao atualizar lead",
+        detail: error instanceof Error ? error.message : "erro desconhecido",
+      },
+      { status: 500 },
+    );
+  }
+}
+
+export async function DELETE(_: Request, context: Context) {
+  try {
+    await leadService.runBulkAction({
+      action: "DELETE",
+      leadIds: [context.params.id],
+    });
+
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error: "Falha ao excluir lead",
         detail: error instanceof Error ? error.message : "erro desconhecido",
       },
       { status: 500 },

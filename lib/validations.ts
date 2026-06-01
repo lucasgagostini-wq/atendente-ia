@@ -17,6 +17,8 @@ export const leadSchema = z.object({
   aiEnabled: z.boolean().optional(),
   humanTakeover: z.boolean().optional(),
   summary: z.string().optional().or(z.literal("")),
+  interest: z.string().optional().or(z.literal("")),
+  tagIds: z.array(z.string().cuid()).optional(),
 });
 
 export const conversationSchema = z.object({
@@ -84,6 +86,15 @@ export const evolutionSendSchema = z.object({
   text: z.string().min(1),
 });
 
+export const tagSchema = z.object({
+  name: z.string().trim().min(2).max(40),
+  color: z
+    .string()
+    .trim()
+    .regex(/^#([0-9A-Fa-f]{6})$/, "Cor inválida")
+    .optional(),
+});
+
 export const prospectorJobSchema = z.object({
   query: z.string().min(3),
   maxResults: z.number().int().min(1).max(100).default(20),
@@ -91,4 +102,35 @@ export const prospectorJobSchema = z.object({
 
 export const prospectorImportSchema = z.object({
   leadIds: z.array(z.string().cuid()).min(1),
+});
+
+const leadBulkDataSchema = z.object({
+  status: z.enum(["NEW", "QUALIFIED", "NEGOTIATION", "CONVERTED", "LOST"]).optional(),
+  funnelStage: z.enum(["COLD", "WARM", "HOT", "CHECKOUT", "CUSTOMER"]).optional(),
+  source: z.string().optional().or(z.literal("")),
+  aiEnabled: z.boolean().optional(),
+  humanTakeover: z.boolean().optional(),
+});
+
+export const leadsBulkSchema = z.object({
+  leadIds: z.array(z.string().cuid()).min(1),
+  action: z.enum(["DELETE", "ADD_TAGS", "REMOVE_TAGS", "UPDATE_FIELDS"]),
+  tagIds: z.array(z.string().cuid()).optional(),
+  data: leadBulkDataSchema.optional(),
+});
+
+export const broadcastSuggestionSchema = z.object({
+  tagName: z.string().trim().min(2),
+  objective: z.string().trim().optional().or(z.literal("")),
+  baseMessage: z.string().trim().optional().or(z.literal("")),
+});
+
+export const broadcastSendSchema = z.object({
+  tagId: z.string().cuid(),
+  campaignName: z.string().trim().min(2).max(80).optional().or(z.literal("")),
+  baseMessage: z.string().trim().min(4),
+  variations: z.array(z.string().trim().min(2)).max(8).default([]),
+  minIntervalSeconds: z.number().int().min(0).max(120).default(2),
+  maxIntervalSeconds: z.number().int().min(1).max(300).default(8),
+  maxLeads: z.number().int().min(1).max(250).default(120),
 });

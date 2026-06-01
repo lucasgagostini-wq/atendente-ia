@@ -41,6 +41,27 @@ class ProspectorService {
     return Number.isFinite(parsed) ? parsed : null;
   }
 
+  private normalizeTagName(value: string) {
+    return value
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, " ")
+      .split(" ")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
+  }
+
+  private extractQueryTag(query: string) {
+    const normalized = query.trim();
+    if (!normalized) return null;
+
+    const [firstPart] = normalized.split(/\s+em\s+/i);
+    const cleaned = firstPart.replace(/[^a-zA-Z0-9À-ÿ\s-]/g, "").trim();
+    if (cleaned.length < 3) return null;
+
+    return this.normalizeTagName(cleaned.slice(0, 40));
+  }
+
   private mapGoogleMapsItem(jobId: string, item: RawMapsItem) {
     const companyName = String(item.title || item.name || "").trim();
     if (!companyName) return null;
@@ -246,6 +267,17 @@ class ProspectorService {
       create: { name: "Google Maps", color: "#14b8a6" },
     });
 
+    const queryTagName = this.extractQueryTag(job.query);
+    const queryTag = queryTagName
+      ? await prisma.tag.upsert({
+          where: { name: queryTagName },
+          update: { color: "#f97316" },
+          create: { name: queryTagName, color: "#f97316" },
+        })
+      : null;
+
+    const categoryTagMap = new Map<string, string>();
+
     const importedLeadIds: string[] = [];
     let importedCount = 0;
 
@@ -302,11 +334,31 @@ class ProspectorService {
         });
       }
 
+      const tagIds = [prospectTag.id, mapsTag.id];
+      if (queryTag) {
+        tagIds.push(queryTag.id);
+      }
+
+      const categoryName = prospect.businessCategory
+        ? this.normalizeTagName(prospect.businessCategory)
+        : null;
+
+      if (categoryName) {
+        let categoryTagId = categoryTagMap.get(categoryName);
+        if (!categoryTagId) {
+          const categoryTag = await prisma.tag.upsert({
+            where: { name: categoryName },
+            update: { color: "#8b5cf6" },
+            create: { name: categoryName, color: "#8b5cf6" },
+          });
+          categoryTagId = categoryTag.id;
+          categoryTagMap.set(categoryName, categoryTag.id);
+        }
+        tagIds.push(categoryTagId);
+      }
+
       await prisma.leadTag.createMany({
-        data: [
-          { leadId: lead.id, tagId: prospectTag.id },
-          { leadId: lead.id, tagId: mapsTag.id },
-        ],
+        data: tagIds.map((tagId) => ({ leadId: lead.id, tagId })),
         skipDuplicates: true,
       });
 

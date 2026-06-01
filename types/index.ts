@@ -16,6 +16,8 @@ export type Lead = {
   aiEnabled: boolean;
   humanTakeover: boolean;
   summary: string | null;
+  interest: string | null;
+  objections?: Record<string, unknown> | null;
   lastMessage: string | null;
   lastMessageAt: string | null;
   createdAt: string;
@@ -138,6 +140,28 @@ export type ProspectingJob = {
   createdAt: string;
   updatedAt: string;
   leads?: ProspectingLead[];
+};
+
+export type BroadcastSuggestion = {
+  suggestedMessage: string;
+  variations: string[];
+  model: string;
+};
+
+export type BroadcastRunResult = {
+  runId: string;
+  tagId: string;
+  tagName: string;
+  totalEligible: number;
+  attempted: number;
+  sent: number;
+  failed: number;
+  skipped: number;
+  failures: Array<{
+    leadId: string;
+    phone: string;
+    reason: string;
+  }>;
 };
 
 export type LogItem = {

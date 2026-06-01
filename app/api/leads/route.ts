@@ -14,11 +14,16 @@ export async function GET(request: NextRequest) {
   const search = request.nextUrl.searchParams.get("search") ?? undefined;
   const stage = request.nextUrl.searchParams.get("stage") as FunnelStage | null;
   const status = request.nextUrl.searchParams.get("status") as LeadStatus | null;
+  const tagId = request.nextUrl.searchParams.get("tagId") ?? undefined;
+  const onlyDialable =
+    request.nextUrl.searchParams.get("onlyDialable") === "true";
 
   const leads = await leadService.getLeads({
     search,
     stage: stage ?? undefined,
     status: status ?? undefined,
+    tagId,
+    onlyDialable,
   });
 
   return NextResponse.json(leads);
@@ -45,6 +50,15 @@ export async function POST(request: Request) {
       aiEnabled: parsed.data.aiEnabled ?? true,
       humanTakeover: parsed.data.humanTakeover ?? false,
       summary: toNullable(parsed.data.summary),
+      interest: toNullable(parsed.data.interest),
+      leadTags:
+        parsed.data.tagIds && parsed.data.tagIds.length > 0
+          ? {
+              create: parsed.data.tagIds.map((tagId) => ({
+                tag: { connect: { id: tagId } },
+              })),
+            }
+          : undefined,
     });
 
     return NextResponse.json(lead, { status: 201 });
