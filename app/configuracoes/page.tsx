@@ -37,6 +37,16 @@ type EvolutionStatus = {
   raw?: any;
 };
 
+function extractQr(payload: any) {
+  return (
+    payload?.connected?.base64 ||
+    payload?.connected?.qrcode ||
+    payload?.connected?.qr ||
+    payload?.connected?.data?.base64 ||
+    null
+  );
+}
+
 export default function ConfiguracoesPage() {
   const settingsQuery = useSettings();
   const integrationsStatus = useIntegrationsStatus();
@@ -46,6 +56,8 @@ export default function ConfiguracoesPage() {
   const [form, setForm] = useState<Partial<Settings>>({});
   const [evolutionStatus, setEvolutionStatus] = useState<EvolutionStatus | null>(null);
   const [qrCode, setQrCode] = useState<string | null>(null);
+  const [qrAutoRefresh, setQrAutoRefresh] = useState(false);
+  const [connectingEvolution, setConnectingEvolution] = useState(false);
   const [testPhone, setTestPhone] = useState("");
   const [testMessage, setTestMessage] = useState("Mensagem de teste do Atendente IA");
   const [testingAi, setTestingAi] = useState(false);
@@ -60,6 +72,10 @@ export default function ConfiguracoesPage() {
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Falha ao buscar status");
       setEvolutionStatus(payload);
+      if (payload?.connected) {
+        setQrAutoRefresh(false);
+        setQrCode(null);
+      }
       await refetchIntegrations();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Erro ao buscar status.");
@@ -94,19 +110,19 @@ export default function ConfiguracoesPage() {
     await Promise.all([refreshEvolutionStatus(), refetchIntegrations()]);
   }
 
-  async function connectEvolution() {
+  const connectEvolution = useCallback(async (options?: { silent?: boolean }) => {
+    if (!options?.silent) setConnectingEvolution(true);
     const response = await fetch("/api/evolution/connect", { method: "POST" });
     const payload = await response.json();
     if (!response.ok) {
-      toast.error(payload.error || "Falha ao conectar Evolution");
+      if (!options?.silent) {
+        toast.error(payload.error || "Falha ao conectar Evolution");
+      }
+      if (!options?.silent) setConnectingEvolution(false);
       return;
     }
 
-    const possibleQr =
-      payload?.connected?.base64 ||
-      payload?.connected?.qrcode ||
-      payload?.connected?.qr ||
-      payload?.connected?.data?.base64;
+    const possibleQr = extractQr(payload);
 
     if (possibleQr && typeof possibleQr === "string") {
       setQrCode(
@@ -114,11 +130,15 @@ export default function ConfiguracoesPage() {
           ? possibleQr
           : `data:image/png;base64,${possibleQr}`,
       );
+      setQrAutoRefresh(true);
     }
 
-    toast.success("Conexão iniciada. Escaneie o QR Code se disponível.");
+    if (!options?.silent) {
+      toast.success("Conexão iniciada. Escaneie o QR Code se disponível.");
+    }
     await Promise.all([refreshEvolutionStatus(), refetchIntegrations()]);
-  }
+    if (!options?.silent) setConnectingEvolution(false);
+  }, [refetchIntegrations, refreshEvolutionStatus]);
 
   async function saveAndConnectEvolution() {
     try {
@@ -137,8 +157,19 @@ export default function ConfiguracoesPage() {
       return;
     }
     toast.success("Reconexão solicitada.");
+    setQrAutoRefresh(true);
     await Promise.all([refreshEvolutionStatus(), refetchIntegrations()]);
   }
+
+  useEffect(() => {
+    if (!qrAutoRefresh || evolutionStatus?.connected) return;
+
+    const interval = setInterval(() => {
+      connectEvolution({ silent: true });
+    }, 12000);
+
+    return () => clearInterval(interval);
+  }, [connectEvolution, qrAutoRefresh, evolutionStatus?.connected]);
 
   async function testSend() {
     const response = await fetch("/api/evolution/send", {
@@ -262,13 +293,21 @@ export default function ConfiguracoesPage() {
             </Badge>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button variant="secondary" onClick={saveAndConnectEvolution}>
+            <Button
+              variant="secondary"
+              onClick={saveAndConnectEvolution}
+              disabled={connectingEvolution}
+            >
               <QrCode className="mr-1 size-4" />
               Salvar + Conectar / QR Code
             </Button>
-            <Button variant="outline" onClick={connectEvolution}>
+            <Button
+              variant="outline"
+              onClick={() => connectEvolution()}
+              disabled={connectingEvolution}
+            >
               <Wifi className="mr-1 size-4" />
-              Conectar com dados salvos
+              {connectingEvolution ? "Conectando..." : "Conectar com dados salvos"}
             </Button>
             <Button variant="outline" onClick={reconnectEvolution}>
               <RefreshCcw className="mr-1 size-4" />
@@ -285,6 +324,9 @@ export default function ConfiguracoesPage() {
                 className="size-56"
                 unoptimized
               />
+              <p className="mt-2 text-xs text-zinc-400">
+                QR atualizado automaticamente a cada 12s.
+              </p>
             </div>
           )}
         </CardContent>

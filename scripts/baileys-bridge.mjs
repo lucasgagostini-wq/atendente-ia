@@ -101,7 +101,7 @@ async function startSocket(forceRestart = false) {
 
     const sock = makeWASocket({
       auth: state,
-      browser: Browsers.macOS("Desktop"),
+      browser: Browsers.ubuntu("Chrome"),
       version,
       markOnlineOnConnect: false,
       printQRInTerminal: true,
@@ -278,6 +278,60 @@ app.post("/webhook/set/:instance", (req, res) => {
       url: webhookUrl || null,
     },
   });
+});
+
+app.post("/instance/pairingCode/:instance", async (req, res) => {
+  const mismatch = ensureInstance(req.params.instance);
+  if (mismatch) {
+    res.status(mismatch.status).json(mismatch.payload);
+    return;
+  }
+
+  const phone = normalizePhone(req.body?.phone);
+  if (!phone) {
+    res.status(400).json({
+      status: 400,
+      error: "Bad Request",
+      response: { message: ["phone is required"] },
+    });
+    return;
+  }
+
+  await startSocket();
+
+  if (!socket) {
+    res.status(500).json({
+      status: 500,
+      error: "Internal Server Error",
+      response: { message: ["socket not initialized"] },
+    });
+    return;
+  }
+
+  try {
+    if (socket.authState?.creds?.registered) {
+      res.json({
+        code: null,
+        message: "already registered",
+      });
+      return;
+    }
+
+    const code = await socket.requestPairingCode(phone);
+    res.json({ code });
+  } catch (error) {
+    res.status(500).json({
+      status: 500,
+      error: "Internal Server Error",
+      response: {
+        message: [
+          error instanceof Error
+            ? error.message
+            : "failed to request pairing code",
+        ],
+      },
+    });
+  }
 });
 
 app.post("/message/sendText/:instance", async (req, res) => {
