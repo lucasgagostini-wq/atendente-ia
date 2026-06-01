@@ -6,8 +6,18 @@ export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
 export async function GET() {
-  const jobs = await prospectorService.listJobs();
-  return NextResponse.json(jobs);
+  try {
+    const jobs = await prospectorService.listJobs();
+    return NextResponse.json(jobs);
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error: "Falha ao listar jobs de prospecção",
+        detail: error instanceof Error ? error.message : "erro desconhecido",
+      },
+      { status: 500 },
+    );
+  }
 }
 
 export async function POST(request: Request) {
@@ -34,4 +44,3 @@ export async function POST(request: Request) {
     );
   }
 }
-
