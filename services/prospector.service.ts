@@ -122,7 +122,7 @@ class ProspectorService {
         searchStrings: [input.query],
         maxCrawledPlaces: input.maxResults,
         maxCrawledPlacesPerSearch: input.maxResults,
-        language: "pt",
+        language: "pt-BR",
         countryCode: "br",
       };
 
