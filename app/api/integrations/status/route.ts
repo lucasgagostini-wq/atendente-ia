@@ -8,7 +8,11 @@ function normalize(value?: string | null) {
   return value && value.trim() ? value.trim() : null;
 }
 
-export async function GET() {
+function isLocalWebhook(url: string) {
+  return /localhost|127\.0\.0\.1|0\.0\.0\.0/i.test(url);
+}
+
+export async function GET(request: Request) {
   const settings = await prisma.settings.upsert({
     where: { id: "default" },
     update: {},
@@ -24,11 +28,19 @@ export async function GET() {
   const apifyApiToken =
     normalize(settings.apifyApiToken) || normalize(process.env.APIFY_API_TOKEN);
 
+  const settingsWebhookUrl = normalize(settings.webhookUrl);
+  const envWebhookBase = normalize(process.env.NEXT_PUBLIC_APP_URL);
+  const envWebhookUrl = envWebhookBase
+    ? `${envWebhookBase.replace(/\/$/, "")}/api/webhooks/evolution`
+    : null;
+  const requestWebhookUrl = `${new URL(request.url).origin.replace(/\/$/, "")}/api/webhooks/evolution`;
+
   const webhookUrl =
-    normalize(settings.webhookUrl) ||
-    (process.env.NEXT_PUBLIC_APP_URL
-      ? `${process.env.NEXT_PUBLIC_APP_URL}/api/webhooks/evolution`
-      : null);
+    (settingsWebhookUrl && !isLocalWebhook(settingsWebhookUrl)
+      ? settingsWebhookUrl
+      : null) ||
+    (envWebhookUrl && !isLocalWebhook(envWebhookUrl) ? envWebhookUrl : null) ||
+    requestWebhookUrl;
 
   const evolutionStatus = await evolutionService.getStatus();
   const evolutionConfigured = Boolean(
@@ -76,4 +88,3 @@ export async function GET() {
     webhookUrl,
   });
 }
-

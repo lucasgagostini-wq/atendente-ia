@@ -74,10 +74,18 @@ export default function ConfiguracoesPage() {
     setForm((previous) => ({ ...previous, [key]: value }));
   };
 
+  const isLocalWebhook = (url: string) =>
+    /localhost|127\.0\.0\.1|0\.0\.0\.0/i.test(url);
+
   async function saveConfig() {
     const payload: Partial<Settings> = { ...form };
-    if (!payload.webhookUrl && typeof window !== "undefined") {
-      payload.webhookUrl = `${window.location.origin}/api/webhooks/evolution`;
+    const normalizedWebhook = payload.webhookUrl?.trim();
+
+    if (
+      typeof window !== "undefined" &&
+      (!normalizedWebhook || isLocalWebhook(normalizedWebhook))
+    ) {
+      payload.webhookUrl = `${window.location.origin.replace(/\/$/, "")}/api/webhooks/evolution`;
       setForm((previous) => ({ ...previous, webhookUrl: payload.webhookUrl }));
     }
 
