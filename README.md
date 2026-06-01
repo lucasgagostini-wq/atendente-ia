@@ -131,6 +131,29 @@ Webhook esperado:
 
 `POST /api/webhooks/evolution`
 
+### Modo sem custo com Baileys (bridge local)
+
+Este projeto inclui um bridge compatível com os endpoints da Evolution:
+
+```bash
+npm run bridge:baileys
+```
+
+Variáveis opcionais:
+
+```env
+BAILEYS_BRIDGE_PORT=8080
+BAILEYS_BRIDGE_API_KEY=troque-essa-chave
+BAILEYS_BRIDGE_INSTANCE_NAME=atendente-ia
+BAILEYS_BRIDGE_WEBHOOK_URL=
+```
+
+Depois, no painel `/configuracoes`, informe:
+
+1. `Evolution API URL`: URL pública do bridge (ex: túnel Cloudflare)
+2. `Evolution API Key`: mesma `BAILEYS_BRIDGE_API_KEY`
+3. `Instance Name`: mesma `BAILEYS_BRIDGE_INSTANCE_NAME`
+
 ## OpenRouter
 
 No painel `/configuracoes`:
