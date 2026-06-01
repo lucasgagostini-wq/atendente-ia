@@ -4,6 +4,7 @@ export type ConversationStatus = "OPEN" | "ARCHIVED" | "CLOSED";
 export type MessageDirection = "INBOUND" | "OUTBOUND";
 export type MessageRole = "LEAD" | "ASSISTANT" | "HUMAN" | "SYSTEM";
 export type MessageType = "TEXT" | "IMAGE" | "AUDIO";
+export type ProspectingJobStatus = "QUEUED" | "RUNNING" | "COMPLETED" | "FAILED";
 
 export type Lead = {
   id: string;
@@ -93,6 +94,8 @@ export type Settings = {
   webhookUrl: string | null;
   openRouterApiKey: string | null;
   openRouterModel: string;
+  apifyApiToken: string | null;
+  prospectorMapsActorId: string;
   temperature: number;
   minDelaySeconds: number;
   maxDelaySeconds: number;
@@ -100,6 +103,41 @@ export type Settings = {
   defaultCheckoutUrl: string | null;
   createdAt: string;
   updatedAt: string;
+};
+
+export type ProspectingLead = {
+  id: string;
+  jobId: string;
+  source: string;
+  companyName: string;
+  phone: string | null;
+  rating: number | null;
+  reviewsCount: number | null;
+  address: string | null;
+  website: string | null;
+  mapsUrl: string | null;
+  placeId: string | null;
+  businessCategory: string | null;
+  imported: boolean;
+  importedLeadId: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ProspectingJob = {
+  id: string;
+  query: string;
+  maxResults: number;
+  source: string;
+  status: ProspectingJobStatus;
+  errorMessage: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  resultsCount: number;
+  importedCount: number;
+  createdAt: string;
+  updatedAt: string;
+  leads?: ProspectingLead[];
 };
 
 export type LogItem = {

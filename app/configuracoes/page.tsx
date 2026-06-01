@@ -121,7 +121,7 @@ export default function ConfiguracoesPage() {
       <div>
         <h1>Configurações</h1>
         <p className="mt-1 text-sm text-zinc-400">
-          Evolution API, OpenRouter, delays e modo seguro.
+          Evolution API, OpenRouter, Apify, delays e modo seguro.
         </p>
       </div>
 
@@ -199,10 +199,22 @@ export default function ConfiguracoesPage() {
             value={form.openRouterApiKey || ""}
             onChange={(event) => updateField("openRouterApiKey", event.target.value)}
           />
+          <Input
+            placeholder="Apify API Token"
+            value={form.apifyApiToken || ""}
+            onChange={(event) => updateField("apifyApiToken", event.target.value)}
+          />
           <Select
             options={modelOptions}
             value={form.openRouterModel || modelOptions[0].value}
             onChange={(event) => updateField("openRouterModel", event.target.value)}
+          />
+          <Input
+            placeholder="Actor Google Maps (Apify)"
+            value={form.prospectorMapsActorId || "compass/crawler-google-places"}
+            onChange={(event) =>
+              updateField("prospectorMapsActorId", event.target.value)
+            }
           />
           <Input
             type="number"

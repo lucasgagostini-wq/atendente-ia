@@ -47,6 +47,13 @@ enum MessageType {
   AUDIO
 }
 
+enum ProspectingJobStatus {
+  QUEUED
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
 model User {
   id           String   @id @default(cuid())
   name         String
@@ -75,6 +82,7 @@ model Lead {
   conversations  Conversation[]
   messages       Message[]
   leadTags       LeadTag[]
+  prospectingEntries ProspectingLead[] @relation("ImportedProspectingLead")
 }
 
 model Conversation {
@@ -157,6 +165,8 @@ model Settings {
   webhookUrl            String?
   openRouterApiKey      String?
   openRouterModel       String   @default("deepseek/deepseek-chat")
+  apifyApiToken         String?
+  prospectorMapsActorId String   @default("compass/crawler-google-places")
   temperature           Float    @default(0.6)
   minDelaySeconds       Int      @default(2)
   maxDelaySeconds       Int      @default(8)
@@ -174,3 +184,44 @@ model Log {
   createdAt DateTime @default(now())
 }
 
+model ProspectingJob {
+  id           String             @id @default(cuid())
+  query        String
+  maxResults   Int
+  source       String             @default("google_maps")
+  status       ProspectingJobStatus @default(QUEUED)
+  errorMessage String?
+  startedAt    DateTime?
+  finishedAt   DateTime?
+  resultsCount Int                @default(0)
+  importedCount Int               @default(0)
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  leads        ProspectingLead[]
+}
+
+model ProspectingLead {
+  id               String   @id @default(cuid())
+  jobId            String
+  source           String   @default("google_maps")
+  companyName      String
+  phone            String?
+  rating           Float?
+  reviewsCount     Int?
+  address          String?
+  website          String?
+  mapsUrl          String?
+  placeId          String?
+  businessCategory String?
+  imported         Boolean  @default(false)
+  importedLeadId   String?
+  rawPayload       Json?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  job              ProspectingJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  importedLead     Lead? @relation("ImportedProspectingLead", fields: [importedLeadId], references: [id], onDelete: SetNull)
+
+  @@index([jobId])
+  @@index([phone])
+  @@index([placeId])
+}

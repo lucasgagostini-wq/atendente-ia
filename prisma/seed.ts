@@ -12,6 +12,9 @@ async function main() {
       openRouterApiKey: process.env.OPENROUTER_API_KEY,
       openRouterModel:
         process.env.OPENROUTER_DEFAULT_MODEL ?? "deepseek/deepseek-chat",
+      apifyApiToken: process.env.APIFY_API_TOKEN,
+      prospectorMapsActorId:
+        process.env.PROSPECTOR_MAPS_ACTOR_ID ?? "compass/crawler-google-places",
       webhookUrl: process.env.NEXT_PUBLIC_APP_URL
         ? `${process.env.NEXT_PUBLIC_APP_URL}/api/webhooks/evolution`
         : null,
@@ -24,6 +27,9 @@ async function main() {
       openRouterApiKey: process.env.OPENROUTER_API_KEY,
       openRouterModel:
         process.env.OPENROUTER_DEFAULT_MODEL ?? "deepseek/deepseek-chat",
+      apifyApiToken: process.env.APIFY_API_TOKEN,
+      prospectorMapsActorId:
+        process.env.PROSPECTOR_MAPS_ACTOR_ID ?? "compass/crawler-google-places",
       webhookUrl: process.env.NEXT_PUBLIC_APP_URL
         ? `${process.env.NEXT_PUBLIC_APP_URL}/api/webhooks/evolution`
         : null,
@@ -122,6 +128,8 @@ async function main() {
       { name: "Novo", color: "#3b82f6" },
       { name: "Objeção Preço", color: "#eab308" },
       { name: "Checkout Enviado", color: "#22c55e" },
+      { name: "Prospectado", color: "#06b6d4" },
+      { name: "Google Maps", color: "#14b8a6" },
     ],
   });
 }
@@ -135,4 +143,3 @@ main()
     await prisma.$disconnect();
     process.exit(1);
   });
-

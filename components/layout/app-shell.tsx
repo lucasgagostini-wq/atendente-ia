@@ -6,6 +6,7 @@ import { ReactNode } from "react";
 import {
   Bot,
   LayoutDashboard,
+  MapPinned,
   MessageCircleMore,
   Settings,
   Sparkles,
@@ -18,6 +19,7 @@ const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/conversas", label: "Conversas", icon: MessageCircleMore },
   { href: "/leads", label: "Leads", icon: Users },
+  { href: "/prospeccao", label: "Prospecção", icon: MapPinned },
   { href: "/automacoes", label: "Automações", icon: Workflow },
   { href: "/prompt", label: "Prompt", icon: Sparkles },
   { href: "/configuracoes", label: "Configurações", icon: Settings },
@@ -93,4 +95,3 @@ export function AppShell({ children }: Props) {
     </div>
   );
 }
-

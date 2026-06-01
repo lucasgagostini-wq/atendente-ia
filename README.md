@@ -16,6 +16,7 @@ Principais entregas:
 - Automações de follow-up
 - Prompt master editável
 - Configurações de Evolution/OpenRouter
+- Módulo de prospecção Google Maps com importação para CRM
 - Webhook funcional para mensagens inbound
 - IA com fallback e logs
 
@@ -111,6 +112,8 @@ EVOLUTION_API_KEY=
 EVOLUTION_INSTANCE_NAME=
 OPENROUTER_API_KEY=
 OPENROUTER_DEFAULT_MODEL=deepseek/deepseek-chat
+APIFY_API_TOKEN=
+PROSPECTOR_MAPS_ACTOR_ID=compass/crawler-google-places
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 ```
 
@@ -146,6 +149,9 @@ Se a chave não estiver configurada, o sistema usa fallback local (mock) para co
 
 - `POST /api/webhooks/evolution`
 - `POST /api/ai/respond`
+- `GET|POST /api/prospector/jobs`
+- `GET /api/prospector/jobs/[id]`
+- `POST /api/prospector/jobs/[id]/import`
 - `GET /api/evolution/status`
 - `POST /api/evolution/connect`
 - `POST /api/evolution/reconnect`
@@ -158,6 +164,18 @@ Se a chave não estiver configurada, o sistema usa fallback local (mock) para co
 - `GET|PATCH /api/prompt`
 - `GET|POST /api/automations`
 - `PATCH|DELETE /api/automations/[id]`
+
+## Prospecção Google Maps
+
+Na rota `/prospeccao` você pode:
+
+1. Informar nicho + cidade (ex: `dentista em Porto Alegre`)
+2. Definir quantidade de resultados
+3. Executar varredura via Apify
+4. Selecionar os registros retornados
+5. Importar para o CRM (`/leads`) com tags automáticas:
+   - `Prospectado`
+   - `Google Maps`
 
 ## Como testar webhook
 
@@ -193,4 +211,3 @@ O seed cria a atendente `Camila` com:
 3. Implementar parser robusto de eventos por versão da Evolution
 4. Acrescentar observabilidade (Sentry + métricas)
 5. Incluir testes e2e para webhook e funil de conversão
-

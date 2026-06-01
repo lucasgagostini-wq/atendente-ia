@@ -70,6 +70,8 @@ export const settingsSchema = z.object({
   webhookUrl: z.string().url().optional().or(z.literal("")),
   openRouterApiKey: z.string().optional().or(z.literal("")),
   openRouterModel: z.string().min(2).default("deepseek/deepseek-chat"),
+  apifyApiToken: z.string().optional().or(z.literal("")),
+  prospectorMapsActorId: z.string().optional().or(z.literal("")),
   temperature: z.number().min(0).max(2).default(0.6),
   minDelaySeconds: z.number().int().min(0).max(120).default(2),
   maxDelaySeconds: z.number().int().min(0).max(300).default(8),
@@ -80,4 +82,13 @@ export const settingsSchema = z.object({
 export const evolutionSendSchema = z.object({
   phone: z.string().min(8),
   text: z.string().min(1),
+});
+
+export const prospectorJobSchema = z.object({
+  query: z.string().min(3),
+  maxResults: z.number().int().min(1).max(100).default(20),
+});
+
+export const prospectorImportSchema = z.object({
+  leadIds: z.array(z.string().cuid()).min(1),
 });

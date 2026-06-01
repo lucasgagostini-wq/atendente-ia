@@ -9,6 +9,11 @@ function toNullable(value?: string | null) {
   return value === "" ? null : value;
 }
 
+function toActorId(value?: string | null) {
+  const normalized = value?.trim();
+  return normalized ? normalized : "compass/crawler-google-places";
+}
+
 export async function GET() {
   const settings = await prisma.settings.upsert({
     where: { id: "default" },
@@ -41,6 +46,8 @@ export async function PATCH(request: Request) {
         webhookUrl: toNullable(data.webhookUrl),
         openRouterApiKey: toNullable(data.openRouterApiKey),
         openRouterModel: data.openRouterModel,
+        apifyApiToken: toNullable(data.apifyApiToken),
+        prospectorMapsActorId: toActorId(data.prospectorMapsActorId),
         temperature: data.temperature,
         minDelaySeconds: data.minDelaySeconds,
         maxDelaySeconds: data.maxDelaySeconds,
@@ -55,6 +62,8 @@ export async function PATCH(request: Request) {
         webhookUrl: toNullable(data.webhookUrl) ?? undefined,
         openRouterApiKey: toNullable(data.openRouterApiKey) ?? undefined,
         openRouterModel: data.openRouterModel ?? "deepseek/deepseek-chat",
+        apifyApiToken: toNullable(data.apifyApiToken) ?? undefined,
+        prospectorMapsActorId: toActorId(data.prospectorMapsActorId),
         temperature: data.temperature ?? 0.6,
         minDelaySeconds: data.minDelaySeconds ?? 2,
         maxDelaySeconds: data.maxDelaySeconds ?? 8,
