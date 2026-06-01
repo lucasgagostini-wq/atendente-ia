@@ -23,7 +23,7 @@ export async function POST(request: Request) {
       lead.id,
     );
 
-    const sent = await evolutionService.sendText(lead.phone, parsed.data.text);
+    const sent = await evolutionService.sendTextStrict(lead.phone, parsed.data.text);
 
     await conversationService.saveMessage({
       conversationId: conversation.id,
@@ -37,12 +37,14 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ ok: true, sent });
   } catch (error) {
+    const message = error instanceof Error ? error.message : "erro desconhecido";
+
     return NextResponse.json(
       {
         error: "Falha ao enviar mensagem",
-        detail: error instanceof Error ? error.message : "erro desconhecido",
+        detail: message,
       },
-      { status: 500 },
+      { status: /não configurada/i.test(message) ? 412 : 500 },
     );
   }
 }

@@ -8,6 +8,10 @@ type SendMediaPayload = {
   caption?: string;
 };
 
+type SendOptions = {
+  allowSimulation?: boolean;
+};
+
 class EvolutionService {
   private async getSettings() {
     return prisma.settings.upsert({
@@ -131,8 +135,24 @@ class EvolutionService {
   }
 
   async sendText(phone: string, text: string) {
+    return this.sendTextWithOptions(phone, text);
+  }
+
+  private async sendTextWithOptions(
+    phone: string,
+    text: string,
+    options?: SendOptions,
+  ) {
     const { client, instance, isConfigured } = await this.getClient();
     if (!isConfigured || !client) {
+      const allowSimulation =
+        options?.allowSimulation ?? process.env.NODE_ENV !== "production";
+      if (!allowSimulation) {
+        throw new Error(
+          "Evolution API não configurada. Preencha URL, API Key e Instance Name em Configurações.",
+        );
+      }
+
       return {
         simulated: true,
         phone,
@@ -153,9 +173,21 @@ class EvolutionService {
     return data;
   }
 
-  async sendImage(payload: SendMediaPayload) {
+  async sendTextStrict(phone: string, text: string) {
+    return this.sendTextWithOptions(phone, text, { allowSimulation: false });
+  }
+
+  async sendImage(payload: SendMediaPayload, options?: SendOptions) {
     const { client, instance, isConfigured } = await this.getClient();
     if (!isConfigured || !client) {
+      const allowSimulation =
+        options?.allowSimulation ?? process.env.NODE_ENV !== "production";
+      if (!allowSimulation) {
+        throw new Error(
+          "Evolution API não configurada. Preencha URL, API Key e Instance Name em Configurações.",
+        );
+      }
+
       return { simulated: true, ...payload };
     }
 
@@ -168,9 +200,17 @@ class EvolutionService {
     return data;
   }
 
-  async sendAudio(payload: SendMediaPayload) {
+  async sendAudio(payload: SendMediaPayload, options?: SendOptions) {
     const { client, instance, isConfigured } = await this.getClient();
     if (!isConfigured || !client) {
+      const allowSimulation =
+        options?.allowSimulation ?? process.env.NODE_ENV !== "production";
+      if (!allowSimulation) {
+        throw new Error(
+          "Evolution API não configurada. Preencha URL, API Key e Instance Name em Configurações.",
+        );
+      }
+
       return { simulated: true, ...payload };
     }
 
@@ -183,4 +223,3 @@ class EvolutionService {
 }
 
 export const evolutionService = new EvolutionService();
-

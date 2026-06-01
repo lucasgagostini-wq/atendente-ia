@@ -8,12 +8,14 @@ export async function POST() {
     const payload = await evolutionService.reconnect();
     return NextResponse.json(payload);
   } catch (error) {
+    const message = error instanceof Error ? error.message : "erro desconhecido";
+
     return NextResponse.json(
       {
         error: "Falha ao reconectar instância",
-        detail: error instanceof Error ? error.message : "erro desconhecido",
+        detail: message,
       },
-      { status: 500 },
+      { status: /não configurada/i.test(message) ? 412 : 500 },
     );
   }
 }

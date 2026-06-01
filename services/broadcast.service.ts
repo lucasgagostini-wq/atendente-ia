@@ -164,7 +164,7 @@ class BroadcastService {
 
       try {
         const conversation = await conversationService.getOrCreateOpenConversation(lead.id);
-        const sentPayload = await evolutionService.sendText(lead.phone, text);
+        const sentPayload = await evolutionService.sendTextStrict(lead.phone, text);
         const safeSentPayload = JSON.parse(
           JSON.stringify(sentPayload ?? null),
         ) as Prisma.InputJsonValue;

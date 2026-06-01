@@ -1,9 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
-import { QrCode, RefreshCcw, Save, Send, Wifi } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  QrCode,
+  RefreshCcw,
+  Save,
+  Send,
+  Sparkles,
+  Wifi,
+} from "lucide-react";
 import { toast } from "sonner";
+import { useIntegrationsStatus } from "@/hooks/use-integrations";
 import { useSettings, useUpdateSettings } from "@/hooks/use-settings";
 import { Settings } from "@/types";
 import { Badge } from "@/components/ui/badge";
@@ -29,40 +39,51 @@ type EvolutionStatus = {
 
 export default function ConfiguracoesPage() {
   const settingsQuery = useSettings();
+  const integrationsStatus = useIntegrationsStatus();
+  const refetchIntegrations = integrationsStatus.refetch;
   const updateSettings = useUpdateSettings();
+
   const [form, setForm] = useState<Partial<Settings>>({});
   const [evolutionStatus, setEvolutionStatus] = useState<EvolutionStatus | null>(null);
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [testPhone, setTestPhone] = useState("");
   const [testMessage, setTestMessage] = useState("Mensagem de teste do Atendente IA");
+  const [testingAi, setTestingAi] = useState(false);
 
   useEffect(() => {
     if (settingsQuery.data) setForm(settingsQuery.data);
   }, [settingsQuery.data]);
 
-  async function refreshEvolutionStatus() {
+  const refreshEvolutionStatus = useCallback(async () => {
     try {
       const response = await fetch("/api/evolution/status");
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Falha ao buscar status");
       setEvolutionStatus(payload);
+      await refetchIntegrations();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Erro ao buscar status.");
     }
-  }
+  }, [refetchIntegrations]);
 
   useEffect(() => {
     refreshEvolutionStatus();
-  }, []);
+  }, [refreshEvolutionStatus]);
 
   const updateField = (key: keyof Settings, value: string | number | boolean) => {
     setForm((previous) => ({ ...previous, [key]: value }));
   };
 
   async function saveConfig() {
-    await updateSettings.mutateAsync(form);
+    const payload: Partial<Settings> = { ...form };
+    if (!payload.webhookUrl && typeof window !== "undefined") {
+      payload.webhookUrl = `${window.location.origin}/api/webhooks/evolution`;
+      setForm((previous) => ({ ...previous, webhookUrl: payload.webhookUrl }));
+    }
+
+    await updateSettings.mutateAsync(payload);
     toast.success("Configurações salvas.");
-    await refreshEvolutionStatus();
+    await Promise.all([refreshEvolutionStatus(), refetchIntegrations()]);
   }
 
   async function connectEvolution() {
@@ -88,7 +109,16 @@ export default function ConfiguracoesPage() {
     }
 
     toast.success("Conexão iniciada. Escaneie o QR Code se disponível.");
-    await refreshEvolutionStatus();
+    await Promise.all([refreshEvolutionStatus(), refetchIntegrations()]);
+  }
+
+  async function saveAndConnectEvolution() {
+    try {
+      await saveConfig();
+      await connectEvolution();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Falha ao salvar e conectar.");
+    }
   }
 
   async function reconnectEvolution() {
@@ -99,7 +129,7 @@ export default function ConfiguracoesPage() {
       return;
     }
     toast.success("Reconexão solicitada.");
-    await refreshEvolutionStatus();
+    await Promise.all([refreshEvolutionStatus(), refetchIntegrations()]);
   }
 
   async function testSend() {
@@ -110,11 +140,46 @@ export default function ConfiguracoesPage() {
     });
     const payload = await response.json();
     if (!response.ok) {
-      toast.error(payload.error || "Falha no envio de teste.");
+      toast.error(payload.detail || payload.error || "Falha no envio de teste.");
       return;
     }
     toast.success("Envio de teste concluído.");
   }
+
+  async function testAi() {
+    try {
+      setTestingAi(true);
+      const response = await fetch("/api/integrations/test-ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: "Escreva uma mensagem curta para iniciar conversa com uma hamburgueria.",
+        }),
+      });
+      const payload = await response.json();
+      if (!response.ok) {
+        toast.error(payload.detail || payload.error || "Falha no teste de IA.");
+        return;
+      }
+      toast.success(`IA OK (${payload.model}).`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Falha no teste de IA.");
+    } finally {
+      setTestingAi(false);
+    }
+  }
+
+  const checks = integrationsStatus.data?.checks;
+  const missing = integrationsStatus.data?.missing ?? [];
+  const healthy = useMemo(() => {
+    if (!checks) return false;
+    return (
+      checks.evolutionConfigured &&
+      checks.evolutionConnected &&
+      checks.webhookConfigured &&
+      checks.openRouterConfigured
+    );
+  }, [checks]);
 
   return (
     <div className="space-y-6">
@@ -124,6 +189,52 @@ export default function ConfiguracoesPage() {
           Evolution API, OpenRouter, Apify, delays e modo seguro.
         </p>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Prontidão de integrações</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex flex-wrap gap-2">
+            <Badge variant={healthy ? "success" : "warning"}>
+              {healthy ? "Operação pronta" : "Configuração pendente"}
+            </Badge>
+            <Badge variant={checks?.evolutionConfigured ? "success" : "warning"}>
+              Evolution: {checks?.evolutionConfigured ? "credenciais OK" : "faltando"}
+            </Badge>
+            <Badge variant={checks?.evolutionConnected ? "success" : "warning"}>
+              WhatsApp: {checks?.evolutionConnected ? "conectado" : "desconectado"}
+            </Badge>
+            <Badge variant={checks?.openRouterConfigured ? "success" : "warning"}>
+              OpenRouter: {checks?.openRouterConfigured ? "ativo" : "faltando chave"}
+            </Badge>
+            <Badge variant={checks?.webhookConfigured ? "success" : "warning"}>
+              Webhook: {checks?.webhookConfigured ? "configurado" : "faltando URL"}
+            </Badge>
+          </div>
+
+          {!healthy && (
+            <div className="rounded-md border border-yellow-500/30 bg-yellow-500/10 p-3 text-sm text-yellow-100">
+              <div className="mb-1 flex items-center gap-2">
+                <AlertTriangle className="size-4" />
+                Itens pendentes
+              </div>
+              {missing.map((item) => (
+                <p key={item}>- {item}</p>
+              ))}
+            </div>
+          )}
+
+          {healthy && (
+            <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-100">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="size-4" />
+                Tudo pronto para receber e responder mensagens automáticas.
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
@@ -143,12 +254,16 @@ export default function ConfiguracoesPage() {
             </Badge>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button variant="secondary" onClick={connectEvolution}>
+            <Button variant="secondary" onClick={saveAndConnectEvolution}>
               <QrCode className="mr-1 size-4" />
-              Conectar / QR Code
+              Salvar + Conectar / QR Code
+            </Button>
+            <Button variant="outline" onClick={connectEvolution}>
+              <Wifi className="mr-1 size-4" />
+              Conectar com dados salvos
             </Button>
             <Button variant="outline" onClick={reconnectEvolution}>
-              <Wifi className="mr-1 size-4" />
+              <RefreshCcw className="mr-1 size-4" />
               Reconectar sessão
             </Button>
           </div>
@@ -190,7 +305,7 @@ export default function ConfiguracoesPage() {
             }
           />
           <Input
-            placeholder="Webhook URL"
+            placeholder="Webhook URL (deixe vazio para auto preencher)"
             value={form.webhookUrl || ""}
             onChange={(event) => updateField("webhookUrl", event.target.value)}
           />
@@ -259,7 +374,11 @@ export default function ConfiguracoesPage() {
             />
             Modo seguro ativado
           </label>
-          <div className="md:col-span-2 flex justify-end">
+          <div className="md:col-span-2 flex flex-wrap justify-end gap-2">
+            <Button variant="outline" onClick={testAi} disabled={testingAi}>
+              <Sparkles className="mr-1 size-4" />
+              {testingAi ? "Testando IA..." : "Testar IA"}
+            </Button>
             <Button
               variant="secondary"
               onClick={saveConfig}

@@ -24,12 +24,14 @@ export async function POST() {
 
     return NextResponse.json({ connected, webhook });
   } catch (error) {
+    const message = error instanceof Error ? error.message : "erro desconhecido";
+
     return NextResponse.json(
       {
         error: "Falha ao conectar instância",
-        detail: error instanceof Error ? error.message : "erro desconhecido",
+        detail: message,
       },
-      { status: 500 },
+      { status: /não configurada/i.test(message) ? 412 : 500 },
     );
   }
 }

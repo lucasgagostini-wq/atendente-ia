@@ -116,7 +116,7 @@ export async function POST(request: Request) {
       await leadService.setAiState(lead.id, false);
       const transferText =
         "Perfeito. Vou pausar a IA e encaminhar você para nosso atendimento humano agora.";
-      const sent = await evolutionService.sendText(lead.phone, transferText);
+      const sent = await evolutionService.sendTextStrict(lead.phone, transferText);
 
       await conversationService.saveMessage({
         conversationId: conversation.id,
@@ -171,7 +171,7 @@ export async function POST(request: Request) {
       },
     });
 
-    const sent = await evolutionService.sendText(lead.phone, aiResponse.output);
+    const sent = await evolutionService.sendTextStrict(lead.phone, aiResponse.output);
 
     return NextResponse.json({
       ok: true,
@@ -179,20 +179,24 @@ export async function POST(request: Request) {
       sent,
     });
   } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Erro desconhecido no webhook";
+
     await prisma.log.create({
       data: {
         type: "WEBHOOK_ERROR",
-        message:
-          error instanceof Error ? error.message : "Erro desconhecido no webhook",
+        message,
       },
     });
 
     return NextResponse.json(
       {
         error: "Falha no processamento do webhook",
-        detail: error instanceof Error ? error.message : "erro desconhecido",
+        detail: message,
       },
-      { status: 500 },
+      {
+        status: /não configurada/i.test(message) ? 412 : 500,
+      },
     );
   }
 }
