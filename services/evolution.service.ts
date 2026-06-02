@@ -12,13 +12,27 @@ type SendOptions = {
   allowSimulation?: boolean;
 };
 
+function isLocalUrl(value: string) {
+  return /localhost|127\.0\.0\.1|0\.0\.0\.0/i.test(value);
+}
+
+function resolveServiceUrl(settingsUrl?: string | null) {
+  const settingsValue = settingsUrl?.trim() || "";
+  const envValue = process.env.EVOLUTION_API_URL?.trim() || "";
+
+  if (process.env.VERCEL && settingsValue && isLocalUrl(settingsValue)) {
+    return envValue && !isLocalUrl(envValue) ? envValue : "";
+  }
+
+  return settingsValue || envValue;
+}
+
 class EvolutionService {
 
 
-  private async getClient() {
+  private async getClient(timeout = 15_000) {
     const settings = await getSettings();
-    const baseURL =
-      settings.evolutionApiUrl || process.env.EVOLUTION_API_URL || "";
+    const baseURL = resolveServiceUrl(settings.evolutionApiUrl);
     const apiKey = settings.evolutionApiKey || process.env.EVOLUTION_API_KEY || "";
     const instance =
       settings.evolutionInstanceName || process.env.EVOLUTION_INSTANCE_NAME || "";
@@ -33,7 +47,7 @@ class EvolutionService {
 
     const client = axios.create({
       baseURL,
-      timeout: 15_000,
+      timeout,
       headers: {
         "Content-Type": "application/json",
         apikey: apiKey,
@@ -44,7 +58,7 @@ class EvolutionService {
   }
 
   async getStatus() {
-    const { client, instance, isConfigured } = await this.getClient();
+    const { client, instance, isConfigured } = await this.getClient(4_000);
 
     if (!isConfigured || !client) {
       return {

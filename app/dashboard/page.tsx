@@ -12,6 +12,7 @@ import {
   Fire,
   Gear,
   Lightning,
+  MapPin,
   Megaphone,
   Robot,
   Target,
@@ -32,7 +33,6 @@ import { Button } from "@/components/ui/button";
 import { useConversations } from "@/hooks/use-conversations";
 import { useLeads } from "@/hooks/use-leads";
 import { useIntegrationsStatus } from "@/hooks/use-integrations";
-import { formatPhone } from "@/lib/utils";
 
 function isSameDay(a: Date, b: Date) {
   return a.getFullYear() === b.getFullYear() &&
@@ -53,9 +53,9 @@ export default function DashboardPage() {
   const { data: integrations } = useIntegrationsStatus();
 
   const loading = leadsLoading || conversationsLoading;
-  const today = new Date();
 
   const metrics = useMemo(() => {
+    const today = new Date();
     const totalLeads = leads.length;
     const openConversations = conversations.filter((c) => c.status === "OPEN").length;
     const hotLeads = leads.filter((l) => ["HOT", "CHECKOUT"].includes(l.funnelStage)).length;
@@ -68,15 +68,17 @@ export default function DashboardPage() {
     return { totalLeads, openConversations, hotLeads, conversions, messagesToday, aiActive };
   }, [conversations, leads]);
 
-  const weeklySeries = useMemo(() =>
-    Array.from({ length: 7 }).map((_, i) => {
+  const weeklySeries = useMemo(() => {
+    const today = new Date();
+
+    return Array.from({ length: 7 }).map((_, i) => {
       const day = subDays(today, 6 - i);
       const value = leads.filter((l) =>
         l.lastMessageAt ? isSameDay(new Date(l.lastMessageAt), day) : false,
       ).length;
       return { label: format(day, "EEE", { locale: ptBR }), value };
-    }),
-  [leads]);
+    });
+  }, [leads]);
 
   const recentActivity = useMemo(() =>
     conversations
@@ -107,6 +109,78 @@ export default function DashboardPage() {
   ];
   const setupDone = setupItems.filter((i) => i.done).length;
   const allSetup = setupDone === setupItems.length;
+  const adminFlow = [
+    {
+      step: "01",
+      title: "Preparar operação",
+      description: "Conecte WhatsApp, IA e webhook antes de abrir o atendimento automático.",
+      href: "/configuracoes",
+      done: allSetup,
+      icon: Gear,
+    },
+    {
+      step: "02",
+      title: "Definir a voz da IA",
+      description: "Ajuste objetivo, tom e regras para a IA atender do jeito certo.",
+      href: "/prompt",
+      done: aiOk,
+      icon: Robot,
+    },
+    {
+      step: "03",
+      title: "Abastecer o CRM",
+      description: "Importe leads do Maps, revise tags e organize sua base para operar.",
+      href: "/prospeccao",
+      done: leads.length > 0,
+      icon: MapPin,
+    },
+    {
+      step: "04",
+      title: "Operar e escalar",
+      description: "Acompanhe conversas abertas e depois avance para disparos e automações.",
+      href: "/conversas",
+      done: conversations.length > 0,
+      icon: ChatCircleText,
+    },
+  ];
+  const workspaceGuide = [
+    {
+      title: "Atendimentos ao vivo",
+      description: "Ver mensagens, assumir conversa, pausar IA e responder manualmente.",
+      href: "/conversas",
+      icon: ChatCircleText,
+      color: "text-sky-400",
+      bg: "bg-sky-500/10",
+      ring: "ring-sky-500/20",
+    },
+    {
+      title: "Leads e CRM",
+      description: "Editar dados, corrigir campos faltantes, criar tags e agir em massa.",
+      href: "/leads",
+      icon: Users,
+      color: "text-indigo-400",
+      bg: "bg-indigo-500/10",
+      ring: "ring-indigo-500/20",
+    },
+    {
+      title: "Prospecção no Maps",
+      description: "Rodar varreduras, revisar resultados e importar só os leads úteis.",
+      href: "/prospeccao",
+      icon: Target,
+      color: "text-emerald-400",
+      bg: "bg-emerald-500/10",
+      ring: "ring-emerald-500/20",
+    },
+    {
+      title: "Disparos e escala",
+      description: "Separar por tag e preparar campanhas quando a base estiver pronta.",
+      href: "/disparos",
+      icon: Megaphone,
+      color: "text-amber-400",
+      bg: "bg-amber-500/10",
+      ring: "ring-amber-500/20",
+    },
+  ];
 
   return (
     <>
@@ -201,6 +275,87 @@ export default function DashboardPage() {
             </div>
           </Surface>
         )}
+
+        <div className="grid gap-4 xl:grid-cols-[1.1fr,0.9fr]">
+          <Surface padding="none" className="overflow-hidden">
+            <div className="border-b border-zinc-800/50 px-5 py-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-zinc-200">Rotina do admin</p>
+                  <p className="mt-0.5 text-[11px] text-zinc-600">
+                    Ordem sugerida para usar a plataforma sem se perder.
+                  </p>
+                </div>
+                <Badge variant={allSetup ? "success" : "warning"}>
+                  {allSetup ? "Operação pronta" : "Em configuração"}
+                </Badge>
+              </div>
+            </div>
+
+            <div className="divide-y divide-zinc-800/40">
+              {adminFlow.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <Link
+                    key={item.title}
+                    href={item.href}
+                    className="flex items-start gap-4 px-5 py-4 transition-colors hover:bg-zinc-800/30"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="grid size-9 shrink-0 place-items-center rounded-xl bg-zinc-900 ring-1 ring-zinc-800/70">
+                        <span className="text-[11px] font-semibold text-zinc-400">{item.step}</span>
+                      </div>
+                      <div className={`grid size-9 shrink-0 place-items-center rounded-xl ring-1 ${
+                        item.done ? "bg-emerald-500/10 ring-emerald-500/20" : "bg-zinc-800/60 ring-zinc-700/40"
+                      }`}>
+                        <Icon size={17} weight="duotone" className={item.done ? "text-emerald-400" : "text-zinc-500"} />
+                      </div>
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-sm font-semibold text-zinc-200">{item.title}</p>
+                        <Badge variant={item.done ? "success" : "default"}>
+                          {item.done ? "Pronto" : "Abrir"}
+                        </Badge>
+                      </div>
+                      <p className="mt-1 text-xs leading-5 text-zinc-500">{item.description}</p>
+                    </div>
+                  </Link>
+                );
+              })}
+            </div>
+          </Surface>
+
+          <Surface padding="none" className="overflow-hidden">
+            <div className="border-b border-zinc-800/50 px-5 py-4">
+              <p className="text-sm font-semibold text-zinc-200">Onde fazer cada coisa</p>
+              <p className="mt-0.5 text-[11px] text-zinc-600">
+                Atalhos para as tarefas mais comuns dentro da operação.
+              </p>
+            </div>
+            <div className="grid gap-3 p-4 sm:grid-cols-2">
+              {workspaceGuide.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <Link key={item.href} href={item.href}>
+                    <Surface variant="interactive" padding="md" className="h-full">
+                      <div className="flex items-start gap-3">
+                        <div className={`grid size-9 shrink-0 place-items-center rounded-xl ring-1 ${item.bg} ${item.ring}`}>
+                          <Icon size={17} weight="duotone" className={item.color} />
+                        </div>
+                        <div>
+                          <p className="text-sm font-semibold text-zinc-200">{item.title}</p>
+                          <p className="mt-1 text-xs leading-5 text-zinc-600">{item.description}</p>
+                        </div>
+                      </div>
+                    </Surface>
+                  </Link>
+                );
+              })}
+            </div>
+          </Surface>
+        </div>
 
         {/* ── Status de serviços ─────────────────────── */}
         <div className="grid gap-2 sm:grid-cols-3">

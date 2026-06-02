@@ -22,7 +22,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
-import { Breadcrumb } from "@/components/layout/breadcrumb";
 import { SectionHeader } from "@/components/ui/section-header";
 
 const modelOptions = [
@@ -228,7 +227,6 @@ export default function ConfiguracoesPage() {
 
   return (
     <div className="space-y-6">
-      <Breadcrumb items={[{ label: "Dashboard", href: "/dashboard" }, { label: "Configurações" }]} />
       <SectionHeader
         title="Configurações"
         description="Evolution API, OpenRouter, Apify, delays e modo seguro."

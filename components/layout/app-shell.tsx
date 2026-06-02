@@ -1,58 +1,39 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { ReactNode } from "react";
 import {
-  ChatCircleText,
-  Gear,
-  House,
-  MapPin,
-  Megaphone,
+  ArrowLeft,
   Robot,
   SignOut,
-  Sparkle,
-  TreeStructure,
-  Users,
 } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
-
-const navGroups = [
-  {
-    label: "Principal",
-    items: [
-      { href: "/dashboard",  label: "Dashboard",    icon: House,          weight: "duotone" as const },
-      { href: "/conversas",  label: "Conversas",    icon: ChatCircleText, weight: "duotone" as const },
-      { href: "/leads",      label: "Leads",        icon: Users,          weight: "duotone" as const },
-    ],
-  },
-  {
-    label: "Automação",
-    items: [
-      { href: "/disparos",   label: "Disparos",     icon: Megaphone,      weight: "duotone" as const },
-      { href: "/automacoes", label: "Automações",   icon: TreeStructure,  weight: "duotone" as const },
-      { href: "/prospeccao", label: "Prospecção",   icon: MapPin,         weight: "duotone" as const },
-    ],
-  },
-  {
-    label: "Sistema",
-    items: [
-      { href: "/prompt",         label: "Prompt IA",      icon: Sparkle, weight: "duotone" as const },
-      { href: "/configuracoes",  label: "Configurações",  icon: Gear,    weight: "duotone" as const },
-    ],
-  },
-];
+import { buildBreadcrumbItems, getPageContext, navGroups } from "@/lib/navigation";
 
 type Props = { children: ReactNode };
 
 export function AppShell({ children }: Props) {
   const pathname = usePathname();
+  const router = useRouter();
   const isPublicPage = pathname === "/login" || pathname === "/setup-admin";
+  const pageContext = getPageContext(pathname);
+  const breadcrumbItems = buildBreadcrumbItems(pathname);
+  const siblingItems = pageContext.group?.items ?? [];
+  const showBack = !isPublicPage && pathname !== "/dashboard";
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
     window.location.href = "/login";
+  }
+
+  function goBack() {
+    if (window.history.length > 1) {
+      router.back();
+      return;
+    }
+
+    router.push("/dashboard");
   }
 
   if (isPublicPage) return <>{children}</>;
@@ -138,33 +119,96 @@ export function AppShell({ children }: Props) {
 
           {/* Header */}
           <header className="sticky top-0 z-30 glass border-b border-zinc-800/40 px-5 py-3">
-            <div className="flex items-center justify-between">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
 
-              {/* Mobile brand */}
-              <div className="flex items-center gap-2.5 lg:hidden">
-                <div className="grid size-7 place-items-center rounded-lg bg-indigo-500/15 ring-1 ring-indigo-500/20">
-                  <Robot size={14} weight="duotone" className="text-indigo-400" />
+                {/* Mobile brand */}
+                <div className="flex items-center gap-2.5 lg:hidden">
+                  <div className="grid size-7 place-items-center rounded-lg bg-indigo-500/15 ring-1 ring-indigo-500/20">
+                    <Robot size={14} weight="duotone" className="text-indigo-400" />
+                  </div>
+                  <span className="text-sm font-bold tracking-tight">Atendente IA</span>
                 </div>
-                <span className="text-sm font-bold tracking-tight">Atendente IA</span>
+
+                <div className="hidden min-w-0 flex-1 items-center gap-3 lg:flex">
+                  {showBack && (
+                    <button
+                      onClick={goBack}
+                      className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-zinc-800/60 bg-zinc-900/60 text-zinc-500 transition-all hover:border-zinc-700 hover:bg-zinc-800 hover:text-zinc-100"
+                      aria-label="Voltar"
+                    >
+                      <ArrowLeft size={14} weight="bold" />
+                    </button>
+                  )}
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5 text-xs text-zinc-500">
+                      {breadcrumbItems.map((item, index) => (
+                        <div key={`${item.label}-${index}`} className="flex items-center gap-1.5">
+                          {index > 0 && <span className="text-zinc-700">/</span>}
+                          {item.href ? (
+                            <Link href={item.href} className="transition-colors hover:text-zinc-300">
+                              {item.label}
+                            </Link>
+                          ) : (
+                            <span className="font-medium text-zinc-200">{item.label}</span>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    <p className="mt-0.5 truncate text-[11px] text-zinc-600">
+                      {pageContext.description}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5 rounded-lg border border-zinc-800/60 bg-zinc-900/50 px-2.5 py-1.5 text-[11px] font-medium text-zinc-500">
+                    <span className="size-1.5 rounded-full bg-emerald-400 status-pulse" />
+                    {(process.env.NEXT_PUBLIC_APP_URL ?? "").includes("localhost") ? "local" : "produção"}
+                  </div>
+                  <button
+                    onClick={logout}
+                    className="hidden lg:flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-zinc-600 transition-colors hover:bg-zinc-800/60 hover:text-zinc-300"
+                  >
+                    <SignOut size={13} />
+                    Sair
+                  </button>
+                </div>
               </div>
 
-              {/* Desktop breadcrumb placeholder — filled by pages */}
-              <div className="hidden items-center gap-2 lg:flex" id="breadcrumb-slot">
-                <span className="text-sm text-zinc-600">Operação via WhatsApp + IA</span>
-              </div>
+              <div className="flex items-center gap-2 overflow-x-auto pb-0.5 scrollbar-thin">
+                {showBack && (
+                  <button
+                    onClick={goBack}
+                    className="flex shrink-0 items-center gap-1.5 rounded-lg border border-zinc-800/60 bg-zinc-900/60 px-2.5 py-1.5 text-xs text-zinc-400 transition-all hover:border-zinc-700 hover:bg-zinc-800 hover:text-zinc-100 lg:hidden"
+                  >
+                    <ArrowLeft size={12} weight="bold" />
+                    Voltar
+                  </button>
+                )}
 
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1.5 rounded-lg border border-zinc-800/60 bg-zinc-900/50 px-2.5 py-1.5 text-[11px] font-medium text-zinc-500">
-                  <span className="size-1.5 rounded-full bg-emerald-400 status-pulse" />
-                  {(process.env.NEXT_PUBLIC_APP_URL ?? "").includes("localhost") ? "local" : "produção"}
-                </div>
-                <button
-                  onClick={logout}
-                  className="hidden lg:flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-zinc-600 transition-colors hover:bg-zinc-800/60 hover:text-zinc-300"
-                >
-                  <SignOut size={13} />
-                  Sair
-                </button>
+                {siblingItems.map((item) => {
+                  const active =
+                    pathname === item.href ||
+                    pathname.startsWith(`${item.href}/`);
+                  const Icon = item.icon;
+
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      className={cn(
+                        "flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs transition-all",
+                        active
+                          ? "border-indigo-500/30 bg-indigo-500/10 text-indigo-300"
+                          : "border-zinc-800/60 bg-zinc-900/40 text-zinc-500 hover:border-zinc-700 hover:bg-zinc-800/70 hover:text-zinc-200",
+                      )}
+                    >
+                      <Icon size={12} weight={active ? "duotone" : "regular"} />
+                      {item.shortLabel}
+                    </Link>
+                  );
+                })}
               </div>
             </div>
           </header>

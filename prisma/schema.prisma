@@ -165,7 +165,7 @@ model Settings {
   evolutionInstanceName String?
   webhookUrl            String?
   openRouterApiKey      String?
-  openRouterModel       String   @default("deepseek/deepseek-chat")
+  openRouterModel       String   @default("google/gemma-4-31b-it:free")
   apifyApiToken         String?
   prospectorMapsActorId String   @default("compass/crawler-google-places")
   temperature           Float    @default(0.6)

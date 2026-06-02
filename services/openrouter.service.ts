@@ -14,6 +14,8 @@ type GenerateArgs = {
   maxTokens?: number;
 };
 
+const FREE_FALLBACK_MODEL = "google/gemma-4-31b-it:free";
+
 class OpenRouterService {
 
 
@@ -25,7 +27,10 @@ class OpenRouterService {
     const settings = await getSettings();
     const apiKey = settings.openRouterApiKey || process.env.OPENROUTER_API_KEY;
     const model =
-      args.model || settings.openRouterModel || "deepseek/deepseek-chat";
+      args.model ||
+      settings.openRouterModel ||
+      process.env.OPENROUTER_DEFAULT_MODEL ||
+      FREE_FALLBACK_MODEL;
     const temperature = args.temperature ?? settings.temperature ?? 0.6;
 
     if (!apiKey) {
@@ -104,4 +109,3 @@ class OpenRouterService {
 }
 
 export const openRouterService = new OpenRouterService();
-

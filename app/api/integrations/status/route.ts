@@ -4,6 +4,9 @@ import { evolutionService } from "@/services/evolution.service";
 
 export const dynamic = "force-dynamic";
 
+const DEFAULT_OPENROUTER_MODEL =
+  process.env.OPENROUTER_DEFAULT_MODEL || "google/gemma-4-31b-it:free";
+
 function normalize(value?: string | null) {
   return value && value.trim() ? value.trim() : null;
 }
@@ -80,7 +83,7 @@ export async function GET(request: Request) {
     },
     ai: {
       configured: Boolean(openRouterApiKey),
-      model: settings.openRouterModel || "deepseek/deepseek-chat",
+      model: settings.openRouterModel || DEFAULT_OPENROUTER_MODEL,
     },
     prospector: {
       configured: Boolean(apifyApiToken),

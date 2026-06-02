@@ -5,6 +5,9 @@ import { getSettings, invalidateSettingsCache } from "@/lib/settings-cache";
 
 export const dynamic = "force-dynamic";
 
+const DEFAULT_OPENROUTER_MODEL =
+  process.env.OPENROUTER_DEFAULT_MODEL || "google/gemma-4-31b-it:free";
+
 function toNullable(value?: string | null) {
   if (value === undefined) return undefined;
   return value === "" ? null : value;
@@ -57,7 +60,7 @@ export async function PATCH(request: Request) {
         evolutionInstanceName: toNullable(data.evolutionInstanceName) ?? undefined,
         webhookUrl: toNullable(data.webhookUrl) ?? undefined,
         openRouterApiKey: toNullable(data.openRouterApiKey) ?? undefined,
-        openRouterModel: data.openRouterModel ?? "deepseek/deepseek-chat",
+        openRouterModel: data.openRouterModel ?? DEFAULT_OPENROUTER_MODEL,
         apifyApiToken: toNullable(data.apifyApiToken) ?? undefined,
         prospectorMapsActorId: toActorId(data.prospectorMapsActorId),
         temperature: data.temperature ?? 0.6,

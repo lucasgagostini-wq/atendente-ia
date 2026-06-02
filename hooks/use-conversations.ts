@@ -10,6 +10,9 @@ export function useConversations() {
   return useQuery({
     queryKey: ["conversations"],
     queryFn: () => request<Conversation[]>("/api/conversations"),
+    refetchInterval: 5_000,
+    refetchOnWindowFocus: true,
+    staleTime: 2_000,
   });
 }
 
