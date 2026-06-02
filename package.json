@@ -15,7 +15,8 @@
     "db:studio": "prisma studio",
     "setup": "node scripts/setup.mjs",
     "bridge:baileys": "node scripts/baileys-bridge.mjs",
-    "start:local": "concurrently --names \"APP,WHATSAPP\" --prefix-colors \"cyan,green\" \"npm run dev\" \"npm run bridge:baileys\""
+    "start:local": "concurrently --names \"APP,WHATSAPP\" --prefix-colors \"cyan,green\" \"npm run dev\" \"npm run bridge:baileys\"",
+    "whatsapp": "node scripts/start-whatsapp.mjs"
   },
   "dependencies": {
     "@hapi/boom": "^10.0.1",

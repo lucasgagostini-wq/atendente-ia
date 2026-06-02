@@ -156,7 +156,7 @@ export function AppShell({ children }: Props) {
               <div className="flex items-center gap-2">
                 <div className="flex items-center gap-1.5 rounded-lg border border-zinc-800/60 bg-zinc-900/50 px-2.5 py-1.5 text-[11px] font-medium text-zinc-500">
                   <span className="size-1.5 rounded-full bg-emerald-400 status-pulse" />
-                  localhost
+                  {process.env.NEXT_PUBLIC_APP_URL?.includes("localhost") ? "local" : "produção"}
                 </div>
                 <button
                   onClick={logout}
