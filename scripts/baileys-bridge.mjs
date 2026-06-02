@@ -24,6 +24,7 @@ const instanceName =
 const authDir =
   process.env.BAILEYS_AUTH_DIR || path.resolve(__dirname, "..", ".baileys", instanceName);
 const autoReconnect = process.env.BAILEYS_AUTO_RECONNECT !== "false";
+const autoStart = process.env.BAILEYS_BRIDGE_AUTOSTART === "true";
 
 let webhookUrl = process.env.BAILEYS_BRIDGE_WEBHOOK_URL || "";
 let socket = null;
@@ -32,6 +33,9 @@ let ownerJid = null;
 let lastQrDataUrl = null;
 let lastError = null;
 let starting = null;
+let manualStop = false;
+let pairingReadyAt = 0;
+let pairingReadyWaiters = [];
 
 const app = express();
 app.use(express.json({ limit: "1mb" }));
@@ -59,6 +63,75 @@ function toJid(phone) {
   return `${digits}@s.whatsapp.net`;
 }
 
+function markPairingReady() {
+  pairingReadyAt = Date.now();
+  const waiters = pairingReadyWaiters;
+  pairingReadyWaiters = [];
+  waiters.forEach(({ resolve, timeout }) => {
+    clearTimeout(timeout);
+    resolve();
+  });
+}
+
+function waitForPairingReady(timeoutMs = 30_000) {
+  if (Date.now() - pairingReadyAt < 30_000) {
+    return Promise.resolve();
+  }
+
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      pairingReadyWaiters = pairingReadyWaiters.filter(
+        (waiter) => waiter.resolve !== resolve,
+      );
+      reject(new Error("Tempo esgotado aguardando canal de pareamento."));
+    }, timeoutMs);
+
+    pairingReadyWaiters.push({ resolve, reject, timeout });
+  });
+}
+
+async function stopSocket(reason = "manual stop") {
+  manualStop = true;
+  pairingReadyAt = 0;
+  pairingReadyWaiters.forEach(({ reject, timeout }) => {
+    clearTimeout(timeout);
+    reject(new Error(reason));
+  });
+  pairingReadyWaiters = [];
+
+  if (socket) {
+    try {
+      socket.end(new Error(reason));
+    } catch {
+      // noop
+    }
+  }
+
+  socket = null;
+  socketState = "close";
+  ownerJid = null;
+  lastQrDataUrl = null;
+}
+
+function resetAuthFiles() {
+  if (!fs.existsSync(authDir)) return;
+
+  for (const entry of fs.readdirSync(authDir, { withFileTypes: true })) {
+    if (
+      entry.name.endsWith(".log") ||
+      entry.name.startsWith("qr-") ||
+      entry.name === "qr-live.png"
+    ) {
+      continue;
+    }
+
+    fs.rmSync(path.join(authDir, entry.name), {
+      force: true,
+      recursive: true,
+    });
+  }
+}
+
 async function emitWebhook(payload) {
   if (!webhookUrl) return;
 
@@ -79,7 +152,10 @@ async function emitWebhook(payload) {
   }
 }
 
-async function startSocket(forceRestart = false) {
+async function startSocket(options = {}) {
+  const { forceRestart = false, qr = true } =
+    typeof options === "boolean" ? { forceRestart: options, qr: true } : options;
+
   if (starting) return starting;
 
   starting = (async () => {
@@ -87,14 +163,10 @@ async function startSocket(forceRestart = false) {
       fs.mkdirSync(authDir, { recursive: true });
     }
 
-    if (forceRestart && socket) {
-      try {
-        socket.end(new Error("manual restart"));
-      } catch {
-        // noop
-      }
-      socket = null;
+    if (forceRestart) {
+      await stopSocket("manual restart");
     }
+    manualStop = false;
 
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
     const { version } = await fetchLatestBaileysVersion();
@@ -103,8 +175,11 @@ async function startSocket(forceRestart = false) {
       auth: state,
       browser: Browsers.ubuntu("Chrome"),
       version,
+      connectTimeoutMs: 60_000,
+      defaultQueryTimeoutMs: 120_000,
       markOnlineOnConnect: false,
-      printQRInTerminal: true,
+      printQRInTerminal: qr,
+      qrTimeout: 300_000,
     });
 
     sock.ev.on("creds.update", saveCreds);
@@ -114,6 +189,7 @@ async function startSocket(forceRestart = false) {
 
       if (qr) {
         lastQrDataUrl = await QRCode.toDataURL(qr);
+        markPairingReady();
       }
 
       if (connection) {
@@ -130,7 +206,7 @@ async function startSocket(forceRestart = false) {
         ownerJid = null;
         const statusCode = new Boom(lastDisconnect?.error).output.statusCode;
         const shouldReconnect =
-          autoReconnect && statusCode !== DisconnectReason.loggedOut;
+          !manualStop && autoReconnect && statusCode !== DisconnectReason.loggedOut;
 
         lastError = {
           statusCode,
@@ -143,6 +219,8 @@ async function startSocket(forceRestart = false) {
         if (shouldReconnect) {
           startSocket();
         }
+
+        manualStop = false;
       }
     });
 
@@ -288,6 +366,7 @@ app.post("/instance/pairingCode/:instance", async (req, res) => {
   }
 
   const phone = normalizePhone(req.body?.phone);
+  const customCode = String(req.body?.code || "").trim().toUpperCase();
   if (!phone) {
     res.status(400).json({
       status: 400,
@@ -297,7 +376,21 @@ app.post("/instance/pairingCode/:instance", async (req, res) => {
     return;
   }
 
-  await startSocket();
+  if (customCode && !/^[A-Z0-9]{8}$/.test(customCode)) {
+    res.status(400).json({
+      status: 400,
+      error: "Bad Request",
+      response: { message: ["code must be exactly 8 letters/numbers"] },
+    });
+    return;
+  }
+
+  if (req.body?.reset !== false) {
+    await stopSocket("reset before pairing code");
+    resetAuthFiles();
+  }
+
+  await startSocket({ forceRestart: true, qr: false });
 
   if (!socket) {
     res.status(500).json({
@@ -317,7 +410,8 @@ app.post("/instance/pairingCode/:instance", async (req, res) => {
       return;
     }
 
-    const code = await socket.requestPairingCode(phone);
+    await waitForPairingReady();
+    const code = await socket.requestPairingCode(phone, customCode || undefined);
     res.json({ code });
   } catch (error) {
     res.status(500).json({
@@ -396,12 +490,14 @@ app.listen(port, async () => {
     console.log(`[baileys-bridge] webhook: ${webhookUrl}`);
   }
 
-  try {
-    await startSocket();
-  } catch (error) {
-    lastError =
-      error instanceof Error ? { message: error.message } : { message: "startup failed" };
-    console.error("[baileys-bridge] initial socket startup failed:", error);
+  if (autoStart) {
+    try {
+      await startSocket();
+    } catch (error) {
+      lastError =
+        error instanceof Error ? { message: error.message } : { message: "startup failed" };
+      console.error("[baileys-bridge] initial socket startup failed:", error);
+    }
   }
 });
 
