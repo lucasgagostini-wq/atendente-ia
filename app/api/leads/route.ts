@@ -2,6 +2,7 @@ import { FunnelStage, LeadStatus } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
 import { leadSchema } from "@/lib/validations";
 import { leadService } from "@/services/lead.service";
+import { handleApiError } from "@/lib/api-handler";
 
 export const dynamic = "force-dynamic";
 
@@ -11,22 +12,19 @@ function toNullable(value?: string | null) {
 }
 
 export async function GET(request: NextRequest) {
-  const search = request.nextUrl.searchParams.get("search") ?? undefined;
-  const stage = request.nextUrl.searchParams.get("stage") as FunnelStage | null;
-  const status = request.nextUrl.searchParams.get("status") as LeadStatus | null;
-  const tagId = request.nextUrl.searchParams.get("tagId") ?? undefined;
-  const onlyDialable =
-    request.nextUrl.searchParams.get("onlyDialable") === "true";
-
-  const leads = await leadService.getLeads({
-    search,
-    stage: stage ?? undefined,
-    status: status ?? undefined,
-    tagId,
-    onlyDialable,
-  });
-
-  return NextResponse.json(leads);
+  try {
+    const { searchParams } = request.nextUrl;
+    const leads = await leadService.getLeads({
+      search: searchParams.get("search") ?? undefined,
+      stage: (searchParams.get("stage") as FunnelStage | null) ?? undefined,
+      status: (searchParams.get("status") as LeadStatus | null) ?? undefined,
+      tagId: searchParams.get("tagId") ?? undefined,
+      onlyDialable: searchParams.get("onlyDialable") === "true",
+    });
+    return NextResponse.json(leads);
+  } catch (error) {
+    return handleApiError(error);
+  }
 }
 
 export async function POST(request: Request) {
@@ -63,12 +61,6 @@ export async function POST(request: Request) {
 
     return NextResponse.json(lead, { status: 201 });
   } catch (error) {
-    return NextResponse.json(
-      {
-        error: "Falha ao criar lead",
-        detail: error instanceof Error ? error.message : "erro desconhecido",
-      },
-      { status: 500 },
-    );
+    return handleApiError(error);
   }
 }

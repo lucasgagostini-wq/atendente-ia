@@ -12,6 +12,8 @@ type ConversationFilters = {
   search?: string;
   status?: ConversationStatus;
   stage?: string;
+  limit?: number;
+  cursor?: string;
 };
 
 class ConversationService {
@@ -57,6 +59,8 @@ class ConversationService {
         },
       },
       orderBy: { updatedAt: "desc" },
+      take: filters.limit ?? 50,
+      ...(filters.cursor ? { cursor: { id: filters.cursor }, skip: 1 } : {}),
     });
   }
 

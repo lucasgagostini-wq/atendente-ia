@@ -1,5 +1,6 @@
 "use client";
 
+import { apiRequest as request } from "@/lib/api-client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Lead } from "@/types";
 
@@ -11,22 +12,7 @@ type LeadsFilters = {
   onlyDialable?: boolean;
 };
 
-async function request<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
-  const response = await fetch(input, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers || {}),
-    },
-  });
 
-  const payload = await response.json().catch(() => null);
-  if (!response.ok) {
-    throw new Error(payload?.error || "Erro de requisição");
-  }
-
-  return payload;
-}
 
 function buildLeadsQuery(filters: LeadsFilters = {}) {
   const params = new URLSearchParams();

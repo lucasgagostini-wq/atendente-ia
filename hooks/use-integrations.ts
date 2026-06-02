@@ -1,5 +1,6 @@
 "use client";
 
+import { apiRequest as request } from "@/lib/api-client";
 import { useQuery } from "@tanstack/react-query";
 
 type IntegrationStatus = {
@@ -27,22 +28,7 @@ type IntegrationStatus = {
   webhookUrl: string | null;
 };
 
-async function request<T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> {
-  const response = await fetch(input, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers || {}),
-    },
-  });
 
-  const payload = await response.json().catch(() => null);
-  if (!response.ok) {
-    throw new Error(payload?.error || "Erro de requisição");
-  }
-
-  return payload;
-}
 
 export function useIntegrationsStatus() {
   return useQuery({
