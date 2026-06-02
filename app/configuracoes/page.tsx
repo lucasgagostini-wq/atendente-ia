@@ -3,15 +3,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import {
-  AlertTriangle,
-  CheckCircle2,
+  Warning,
+  CheckCircle,
   QrCode,
-  RefreshCcw,
-  Save,
-  Send,
-  Sparkles,
-  Wifi,
-} from "lucide-react";
+  ArrowsClockwise,
+  FloppyDisk,
+  PaperPlaneTilt,
+  Sparkle,
+  WifiHigh,
+  Gear,
+} from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { useIntegrationsStatus } from "@/hooks/use-integrations";
 import { useSettings, useUpdateSettings } from "@/hooks/use-settings";
@@ -21,8 +22,13 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Select } from "@/components/ui/select";
+import { Breadcrumb } from "@/components/layout/breadcrumb";
+import { SectionHeader } from "@/components/ui/section-header";
 
 const modelOptions = [
+  { label: "google/gemma-4-31b-it:free", value: "google/gemma-4-31b-it:free" },
+  { label: "openai/gpt-oss-20b:free", value: "openai/gpt-oss-20b:free" },
+  { label: "qwen/qwen3-next-80b-a3b-instruct:free", value: "qwen/qwen3-next-80b-a3b-instruct:free" },
   { label: "deepseek/deepseek-chat", value: "deepseek/deepseek-chat" },
   { label: "qwen/qwen-2.5-72b-instruct", value: "qwen/qwen-2.5-72b-instruct" },
   { label: "google/gemini-flash-1.5", value: "google/gemini-flash-1.5" },
@@ -222,12 +228,12 @@ export default function ConfiguracoesPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1>Configurações</h1>
-        <p className="mt-1 text-sm text-zinc-400">
-          Evolution API, OpenRouter, Apify, delays e modo seguro.
-        </p>
-      </div>
+      <Breadcrumb items={[{ label: "Dashboard", href: "/dashboard" }, { label: "Configurações" }]} />
+      <SectionHeader
+        title="Configurações"
+        description="Evolution API, OpenRouter, Apify, delays e modo seguro."
+        icon={<Gear size={18} weight="duotone" className="text-indigo-400" />}
+      />
 
       <Card>
         <CardHeader>
@@ -255,7 +261,7 @@ export default function ConfiguracoesPage() {
           {!healthy && (
             <div className="rounded-md border border-yellow-500/30 bg-yellow-500/10 p-3 text-sm text-yellow-100">
               <div className="mb-1 flex items-center gap-2">
-                <AlertTriangle className="size-4" />
+                <Warning size={16} weight="duotone" />
                 Itens pendentes
               </div>
               {missing.map((item) => (
@@ -267,7 +273,7 @@ export default function ConfiguracoesPage() {
           {healthy && (
             <div className="rounded-md border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-100">
               <div className="flex items-center gap-2">
-                <CheckCircle2 className="size-4" />
+                <CheckCircle size={16} weight="duotone" />
                 Tudo pronto para receber e responder mensagens automáticas.
               </div>
             </div>
@@ -279,7 +285,7 @@ export default function ConfiguracoesPage() {
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Status WhatsApp (Evolution API)</CardTitle>
           <Button size="sm" variant="outline" onClick={refreshEvolutionStatus}>
-            <RefreshCcw className="mr-1 size-4" />
+            <ArrowsClockwise size={14} weight="bold" />
             Atualizar status
           </Button>
         </CardHeader>
@@ -298,7 +304,7 @@ export default function ConfiguracoesPage() {
               onClick={saveAndConnectEvolution}
               disabled={connectingEvolution}
             >
-              <QrCode className="mr-1 size-4" />
+              <QrCode size={14} weight="duotone" />
               Salvar + Conectar / QR Code
             </Button>
             <Button
@@ -306,11 +312,11 @@ export default function ConfiguracoesPage() {
               onClick={() => connectEvolution()}
               disabled={connectingEvolution}
             >
-              <Wifi className="mr-1 size-4" />
+              <WifiHigh size={14} weight="duotone" />
               {connectingEvolution ? "Conectando..." : "Conectar com dados salvos"}
             </Button>
             <Button variant="outline" onClick={reconnectEvolution}>
-              <RefreshCcw className="mr-1 size-4" />
+              <ArrowsClockwise size={14} weight="bold" />
               Reconectar sessão
             </Button>
           </div>
@@ -426,7 +432,7 @@ export default function ConfiguracoesPage() {
           </label>
           <div className="md:col-span-2 flex flex-wrap justify-end gap-2">
             <Button variant="outline" onClick={testAi} disabled={testingAi}>
-              <Sparkles className="mr-1 size-4" />
+              <Sparkle size={14} weight="duotone" />
               {testingAi ? "Testando IA..." : "Testar IA"}
             </Button>
             <Button
@@ -434,7 +440,7 @@ export default function ConfiguracoesPage() {
               onClick={saveConfig}
               disabled={updateSettings.isPending}
             >
-              <Save className="mr-1 size-4" />
+              <FloppyDisk size={14} weight="duotone" />
               Salvar configurações
             </Button>
           </div>
@@ -457,7 +463,7 @@ export default function ConfiguracoesPage() {
             onChange={(event) => setTestMessage(event.target.value)}
           />
           <Button variant="outline" onClick={testSend}>
-            <Send className="mr-1 size-4" />
+            <PaperPlaneTilt size={14} weight="duotone" />
             Testar envio
           </Button>
         </CardContent>

@@ -1,7 +1,20 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
-import { Bot, Search, Send, UserRound, UserRoundCog, Archive } from "lucide-react";
+import { FormEvent, useEffect, useRef, useMemo, useState } from "react";
+import {
+  Archive,
+  Bot,
+  MessageSquarePlus,
+  Search,
+  Send,
+  UserRound,
+  UserRoundCog,
+  Zap,
+  ZapOff,
+  Phone,
+} from "lucide-react";
+import { formatDistanceToNow, format, isToday, isYesterday, differenceInMinutes } from "date-fns";
+import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
 import {
   useConversation,
@@ -13,41 +26,85 @@ import { formatPhone } from "@/lib/utils";
 import { useAppStore } from "@/store/app-store";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Select } from "@/components/ui/select";
+import { Message } from "@/types";
 
-const stageOptions = [
-  { label: "Todos os estágios", value: "ALL" },
-  { label: "Frio", value: "COLD" },
-  { label: "Morno", value: "WARM" },
-  { label: "Quente", value: "HOT" },
-  { label: "Checkout", value: "CHECKOUT" },
-  { label: "Cliente", value: "CUSTOMER" },
-];
+// ─── Helpers ──────────────────────────────────────────────
+
+const stageLabelMap: Record<string, string> = {
+  COLD: "Frio", WARM: "Morno", HOT: "Quente", CHECKOUT: "Checkout", CUSTOMER: "Cliente",
+};
+const stageVariantMap: Record<string, "default" | "info" | "warning" | "success" | "purple"> = {
+  COLD: "default", WARM: "info", HOT: "warning", CHECKOUT: "purple", CUSTOMER: "success",
+};
+
+function formatMessageTime(dateStr: string) {
+  const date = new Date(dateStr);
+  if (isToday(date)) return format(date, "HH:mm");
+  if (isYesterday(date)) return `Ontem ${format(date, "HH:mm")}`;
+  return format(date, "dd/MM HH:mm");
+}
+
+function formatSectionTime(dateStr: string) {
+  const date = new Date(dateStr);
+  if (isToday(date)) return "Hoje";
+  if (isYesterday(date)) return "Ontem";
+  return format(date, "dd 'de' MMMM", { locale: ptBR });
+}
+
+function shouldShowTimestamp(current: Message, previous: Message | undefined) {
+  if (!previous) return true;
+  return differenceInMinutes(new Date(current.createdAt), new Date(previous.createdAt)) > 10;
+}
+
+function isGrouped(current: Message, previous: Message | undefined) {
+  if (!previous) return false;
+  return (
+    current.direction === previous.direction &&
+    differenceInMinutes(new Date(current.createdAt), new Date(previous.createdAt)) < 2
+  );
+}
+
+function Initials({ name }: { name: string }) {
+  return (
+    <div className="grid size-7 shrink-0 place-items-center rounded-full bg-zinc-800 text-xs font-semibold text-zinc-400 ring-1 ring-zinc-700/50">
+      {name.charAt(0).toUpperCase()}
+    </div>
+  );
+}
+
+function TypingIndicator() {
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1 rounded-2xl rounded-bl-sm border border-zinc-700/60 bg-zinc-800/80 px-3.5 py-2.5">
+        <span className="typing-dot size-1.5 rounded-full bg-zinc-400" />
+        <span className="typing-dot size-1.5 rounded-full bg-zinc-400" />
+        <span className="typing-dot size-1.5 rounded-full bg-zinc-400" />
+      </div>
+    </div>
+  );
+}
+
+// ─── Main component ────────────────────────────────────────
 
 export default function ConversasPage() {
   const { data: conversations = [], isLoading } = useConversations();
   const { selectedConversationId, setSelectedConversationId } = useAppStore();
   const [search, setSearch] = useState("");
-  const [stageFilter, setStageFilter] = useState("ALL");
+  const [stageFilter, setStageFilter] = useState<string>("ALL");
   const [manualMessage, setManualMessage] = useState("");
-  const [typing, setTyping] = useState(false);
+  const [sending, setSending] = useState(false);
 
   const updateConversation = useUpdateConversation();
   const updateLead = useUpdateLead();
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const filteredConversations = useMemo(() => {
-    return conversations.filter((conversation) => {
-      const leadName = conversation.lead?.name?.toLowerCase() ?? "";
-      const leadPhone = conversation.lead?.phone ?? "";
-      const bySearch =
-        !search ||
-        leadName.includes(search.toLowerCase()) ||
-        leadPhone.includes(search.trim());
-      const byStage =
-        stageFilter === "ALL" || conversation.lead?.funnelStage === stageFilter;
-
+    return conversations.filter((c) => {
+      const name = c.lead?.name?.toLowerCase() ?? "";
+      const phone = c.lead?.phone ?? "";
+      const bySearch = !search || name.includes(search.toLowerCase()) || phone.includes(search.trim());
+      const byStage = stageFilter === "ALL" || c.lead?.funnelStage === stageFilter;
       return bySearch && byStage;
     });
   }, [conversations, search, stageFilter]);
@@ -58,210 +115,397 @@ export default function ConversasPage() {
     }
   }, [filteredConversations, selectedConversationId, setSelectedConversationId]);
 
-  const selectedConversation = useConversation(selectedConversationId ?? undefined);
-  const selectedLead = selectedConversation.data?.lead;
+  const { data: selected, refetch } = useConversation(selectedConversationId ?? undefined);
+  const lead = selected?.lead;
+  const messages = selected?.messages ?? [];
 
-  async function sendManualMessage(event: FormEvent) {
-    event.preventDefault();
-    if (!selectedLead || !manualMessage.trim()) return;
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages.length]);
 
+  async function sendManualMessage(e: FormEvent) {
+    e.preventDefault();
+    if (!lead || !manualMessage.trim()) return;
     try {
-      setTyping(true);
-      const response = await fetch("/api/evolution/send", {
+      setSending(true);
+      const res = await fetch("/api/evolution/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ phone: selectedLead.phone, text: manualMessage.trim() }),
+        body: JSON.stringify({ phone: lead.phone, text: manualMessage.trim() }),
       });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error || "Falha ao enviar");
-
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Falha ao enviar");
       setManualMessage("");
-      toast.success("Mensagem enviada com sucesso.");
-      await selectedConversation.refetch();
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Falha ao enviar mensagem.");
+      await refetch();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Falha ao enviar mensagem.");
     } finally {
-      setTyping(false);
+      setSending(false);
     }
   }
 
   async function toggleAi() {
-    if (!selectedLead) return;
-    const nextState = !selectedLead.aiEnabled;
-    await updateLead.mutateAsync({
-      id: selectedLead.id,
-      body: { aiEnabled: nextState, humanTakeover: !nextState },
-    });
-    toast.success(nextState ? "IA ativada para este lead." : "IA pausada para este lead.");
-    await selectedConversation.refetch();
+    if (!lead) return;
+    const next = !lead.aiEnabled;
+    await updateLead.mutateAsync({ id: lead.id, body: { aiEnabled: next, humanTakeover: !next } });
+    toast.success(next ? "IA ativada para este lead." : "IA pausada.");
+    await refetch();
   }
 
   async function assumeHuman() {
-    if (!selectedLead) return;
-    await updateLead.mutateAsync({
-      id: selectedLead.id,
-      body: { aiEnabled: false, humanTakeover: true },
-    });
+    if (!lead) return;
+    await updateLead.mutateAsync({ id: lead.id, body: { aiEnabled: false, humanTakeover: true } });
     toast.success("Atendimento humano assumido.");
-    await selectedConversation.refetch();
+    await refetch();
   }
 
   async function archiveConversation() {
     if (!selectedConversationId) return;
-    await updateConversation.mutateAsync({
-      id: selectedConversationId,
-      body: { status: "ARCHIVED" },
-    });
+    await updateConversation.mutateAsync({ id: selectedConversationId, body: { status: "ARCHIVED" } });
     toast.success("Conversa arquivada.");
-    await selectedConversation.refetch();
+    await refetch();
   }
 
+  const stageOptions = [
+    { value: "ALL", label: "Todos" },
+    { value: "COLD", label: "Frio" },
+    { value: "WARM", label: "Morno" },
+    { value: "HOT", label: "Quente" },
+    { value: "CHECKOUT", label: "Checkout" },
+    { value: "CUSTOMER", label: "Cliente" },
+  ];
+
   return (
-    <div className="grid h-[calc(100vh-140px)] grid-cols-1 gap-4 lg:grid-cols-[360px,1fr]">
-      <Card className="flex min-h-0 flex-col">
-        <div className="border-b border-zinc-800 p-4">
-          <h1 className="text-lg">Conversas</h1>
-          <p className="text-sm text-zinc-400">Estilo WhatsApp Web com IA e humano.</p>
-          <div className="mt-4 space-y-2">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-3 size-4 text-zinc-500" />
-              <Input
-                className="pl-9"
-                placeholder="Buscar por nome ou telefone"
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-              />
-            </div>
-            <Select
-              value={stageFilter}
-              onChange={(event) => setStageFilter(event.target.value)}
-              options={stageOptions}
+    <div className="flex h-[calc(100vh-120px)] gap-3 overflow-hidden">
+
+      {/* ── Conversation list ──────────────────────────── */}
+      <div className="flex w-[300px] shrink-0 flex-col overflow-hidden rounded-xl border border-zinc-800/70 bg-zinc-900/60 shadow-card">
+
+        {/* List header */}
+        <div className="border-b border-zinc-800/60 px-4 py-3">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-zinc-200">Conversas</h2>
+            <Badge variant="default">
+              {filteredConversations.filter((c) => c.status === "OPEN").length} abertas
+            </Badge>
+          </div>
+
+          {/* Search */}
+          <div className="relative mt-3">
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-zinc-500" />
+            <Input
+              className="h-8 pl-8 text-xs"
+              placeholder="Buscar por nome ou número..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
             />
           </div>
+
+          {/* Stage filter */}
+          <div className="mt-2 flex gap-1 overflow-x-auto pb-1 scrollbar-thin">
+            {stageOptions.map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => setStageFilter(opt.value)}
+                className={`shrink-0 rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                  stageFilter === opt.value
+                    ? "bg-indigo-500/15 text-indigo-400 ring-1 ring-indigo-500/20"
+                    : "text-zinc-500 hover:bg-zinc-800 hover:text-zinc-300"
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
         </div>
-        <div className="scrollbar-thin min-h-0 flex-1 overflow-y-auto p-2">
-          {isLoading && <p className="p-3 text-sm text-zinc-400">Carregando...</p>}
-          {!isLoading && filteredConversations.length === 0 && (
-            <p className="p-3 text-sm text-zinc-500">Nenhuma conversa encontrada.</p>
+
+        {/* List items */}
+        <div className="flex-1 overflow-y-auto scrollbar-thin">
+          {isLoading && (
+            <div className="space-y-2 p-3">
+              {[...Array(5)].map((_, i) => <div key={i} className="skeleton h-16 rounded-lg" />)}
+            </div>
           )}
-          {filteredConversations.map((conversation) => {
-            const active = conversation.id === selectedConversationId;
-            const latest = conversation.messages?.[0]?.content;
+
+          {!isLoading && filteredConversations.length === 0 && (
+            <div className="flex flex-col items-center justify-center gap-2 py-16 text-center">
+              <MessageSquarePlus className="size-8 text-zinc-700" />
+              <p className="text-sm text-zinc-600">Nenhuma conversa encontrada</p>
+            </div>
+          )}
+
+          {filteredConversations.map((conv) => {
+            const active = conv.id === selectedConversationId;
+            const latest = conv.messages?.[0];
+            const name = conv.lead?.name || "Lead sem nome";
+            const stage = conv.lead?.funnelStage ?? "COLD";
+            const isOpen = conv.status === "OPEN";
 
             return (
               <button
-                key={conversation.id}
-                type="button"
-                onClick={() => setSelectedConversationId(conversation.id)}
-                className={`mb-2 w-full rounded-md border p-3 text-left transition ${
+                key={conv.id}
+                onClick={() => setSelectedConversationId(conv.id)}
+                className={`group relative w-full border-b border-zinc-800/40 px-3 py-3 text-left transition-colors last:border-0 ${
                   active
-                    ? "border-blue-500/60 bg-blue-500/10"
-                    : "border-zinc-800 bg-zinc-950/40 hover:bg-zinc-900"
+                    ? "bg-indigo-500/8 border-l-2 border-l-indigo-400"
+                    : "hover:bg-zinc-800/40"
                 }`}
               >
-                <div className="mb-1 flex items-center justify-between">
-                  <p className="font-medium text-zinc-200">
-                    {conversation.lead?.name || "Lead sem nome"}
-                  </p>
-                  <Badge variant={conversation.status === "OPEN" ? "success" : "default"}>
-                    {conversation.status}
-                  </Badge>
+                <div className="flex items-start gap-2.5">
+                  <div className="relative mt-0.5">
+                    <Initials name={name} />
+                    {isOpen && (
+                      <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-emerald-400 ring-1 ring-zinc-900 status-pulse" />
+                    )}
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-1">
+                      <p className={`truncate text-sm font-medium ${active ? "text-indigo-300" : "text-zinc-200"}`}>
+                        {name}
+                      </p>
+                      {latest?.createdAt && (
+                        <span className="shrink-0 text-[10px] text-zinc-600">
+                          {formatDistanceToNow(new Date(latest.createdAt), { locale: ptBR, addSuffix: false })}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="mt-0.5 flex items-center gap-1.5">
+                      <Badge variant={stageVariantMap[stage]}>
+                        {stageLabelMap[stage]}
+                      </Badge>
+                      {conv.lead?.aiEnabled === false && (
+                        <Badge variant="warning">humano</Badge>
+                      )}
+                    </div>
+
+                    {latest && (
+                      <p className="mt-1 truncate text-xs text-zinc-500">
+                        {latest.direction === "OUTBOUND" && (
+                          <span className="text-zinc-600">Você: </span>
+                        )}
+                        {latest.content}
+                      </p>
+                    )}
+                  </div>
                 </div>
-                <p className="text-xs text-zinc-500">{formatPhone(conversation.lead?.phone || "-")}</p>
-                <p className="mt-2 line-clamp-2 text-sm text-zinc-400">
-                  {latest || "Sem mensagens."}
-                </p>
               </button>
             );
           })}
         </div>
-      </Card>
+      </div>
 
-      <Card className="flex min-h-0 flex-col">
-        {!selectedConversation.data && (
-          <div className="grid flex-1 place-items-center text-zinc-500">
-            Selecione uma conversa para começar.
+      {/* ── Chat area ────────────────────────────────────── */}
+      <div className="flex flex-1 flex-col overflow-hidden rounded-xl border border-zinc-800/70 bg-zinc-900/60 shadow-card">
+
+        {/* Empty state */}
+        {!selected && (
+          <div className="flex flex-1 flex-col items-center justify-center gap-3 text-center">
+            <div className="grid size-14 place-items-center rounded-2xl bg-zinc-800/60 ring-1 ring-zinc-700/50">
+              <MessageSquarePlus className="size-6 text-zinc-600" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-zinc-400">Selecione uma conversa</p>
+              <p className="mt-0.5 text-xs text-zinc-600">Escolha uma conversa na lista ao lado</p>
+            </div>
           </div>
         )}
 
-        {selectedConversation.data && (
+        {selected && (
           <>
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-zinc-800 p-4">
-              <div>
-                <h2>{selectedLead?.name || "Lead sem nome"}</h2>
-                <p className="text-sm text-zinc-400">{formatPhone(selectedLead?.phone || "-")}</p>
+            {/* Chat header */}
+            <div className="flex items-center justify-between border-b border-zinc-800/60 px-5 py-3.5">
+              <div className="flex items-center gap-3">
+                <div className="relative">
+                  <Initials name={lead?.name || "L"} />
+                  {selected.status === "OPEN" && (
+                    <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-emerald-400 ring-1 ring-zinc-900 status-pulse" />
+                  )}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-semibold text-zinc-100">{lead?.name || "Lead sem nome"}</p>
+                    {lead?.funnelStage && (
+                      <Badge variant={stageVariantMap[lead.funnelStage]}>
+                        {stageLabelMap[lead.funnelStage]}
+                      </Badge>
+                    )}
+                    {lead && !lead.aiEnabled && (
+                      <Badge variant="warning">Atendimento humano</Badge>
+                    )}
+                    {lead?.aiEnabled && (
+                      <Badge variant="info">
+                        <Bot className="size-2.5" />
+                        IA ativa
+                      </Badge>
+                    )}
+                  </div>
+                  <p className="mt-0.5 flex items-center gap-1 text-xs text-zinc-500">
+                    <Phone className="size-3" />
+                    {formatPhone(lead?.phone || "-")}
+                  </p>
+                </div>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button size="sm" variant="outline" onClick={toggleAi}>
-                  <Bot className="mr-1 size-4" />
-                  {selectedLead?.aiEnabled ? "Desativar IA" : "Ativar IA"}
+
+              <div className="flex items-center gap-1.5">
+                <Button size="sm" variant="outline" onClick={toggleAi} disabled={updateLead.isPending}>
+                  {lead?.aiEnabled ? (
+                    <><ZapOff className="size-3.5" /> Pausar IA</>
+                  ) : (
+                    <><Zap className="size-3.5" /> Ativar IA</>
+                  )}
                 </Button>
-                <Button size="sm" variant="outline" onClick={assumeHuman}>
-                  <UserRoundCog className="mr-1 size-4" />
-                  Assumir humano
+                <Button size="sm" variant="outline" onClick={assumeHuman} disabled={updateLead.isPending}>
+                  <UserRoundCog className="size-3.5" />
+                  Assumir
                 </Button>
-                <Button size="sm" variant="outline" onClick={archiveConversation}>
-                  <Archive className="mr-1 size-4" />
-                  Arquivar
+                <Button size="sm" variant="ghost" onClick={archiveConversation}>
+                  <Archive className="size-3.5" />
                 </Button>
               </div>
             </div>
 
-            <div className="scrollbar-thin min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
-              {selectedConversation.data.messages?.map((message) => {
-                const inbound = message.direction === "INBOUND";
-                return (
-                  <div
-                    key={message.id}
-                    className={`flex ${inbound ? "justify-start" : "justify-end"}`}
-                  >
-                    <div
-                      className={`max-w-[80%] rounded-md border px-3 py-2 text-sm ${
-                        inbound
-                          ? "border-zinc-700 bg-zinc-900 text-zinc-100"
-                          : "border-blue-500/40 bg-blue-500/20 text-blue-100"
-                      }`}
-                    >
-                      <p>{message.content}</p>
-                      <p className="mt-1 text-[11px] text-zinc-400">
-                        {new Date(message.createdAt).toLocaleTimeString("pt-BR", {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}{" "}
-                        {message.role === "HUMAN" && (
-                          <span className="inline-flex items-center gap-1">
-                            <UserRound className="size-3" />
-                            humano
+            {/* Messages */}
+            <div className="flex-1 overflow-y-auto scrollbar-thin px-5 py-4">
+              <div className="mx-auto max-w-2xl space-y-1">
+                {messages.length === 0 && (
+                  <p className="py-12 text-center text-sm text-zinc-600">Nenhuma mensagem ainda.</p>
+                )}
+
+                {[...messages].reverse().map((msg, i, arr) => {
+                  const prev = arr[i - 1];
+                  const inbound = msg.direction === "INBOUND";
+                  const grouped = isGrouped(msg, prev);
+                  const showTime = shouldShowTimestamp(msg, prev);
+                  const isAi = msg.role === "ASSISTANT";
+                  const isHuman = msg.role === "HUMAN";
+
+                  return (
+                    <div key={msg.id} className="animate-fade-in-up">
+                      {/* Timestamp divider */}
+                      {showTime && (
+                        <div className="my-4 flex items-center gap-3">
+                          <div className="h-px flex-1 bg-zinc-800/60" />
+                          <span className="text-[10px] text-zinc-600">
+                            {formatSectionTime(msg.createdAt)}
+                            {" · "}
+                            {formatMessageTime(msg.createdAt)}
                           </span>
+                          <div className="h-px flex-1 bg-zinc-800/60" />
+                        </div>
+                      )}
+
+                      <div className={`flex ${inbound ? "justify-start" : "justify-end"} ${grouped ? "mt-0.5" : "mt-3"}`}>
+
+                        {/* Inbound avatar placeholder */}
+                        {inbound && (
+                          <div className={`mr-2 mt-auto ${grouped ? "invisible" : ""}`}>
+                            <Initials name={lead?.name || "L"} />
+                          </div>
                         )}
-                      </p>
+
+                        <div className="flex flex-col gap-0.5" style={{ maxWidth: "72%" }}>
+                          <div
+                            className={`relative px-3.5 py-2.5 text-sm leading-relaxed transition-colors ${
+                              inbound
+                                ? `bg-zinc-800/80 text-zinc-100 border border-zinc-700/50 ${
+                                    grouped
+                                      ? "rounded-2xl rounded-tl-md"
+                                      : "rounded-2xl rounded-tl-sm"
+                                  }`
+                                : isAi
+                                ? `bg-indigo-500/10 text-indigo-100 border border-indigo-500/20 ${
+                                    grouped
+                                      ? "rounded-2xl rounded-tr-md"
+                                      : "rounded-2xl rounded-tr-sm"
+                                  }`
+                                : `bg-zinc-700/60 text-zinc-100 border border-zinc-600/40 ${
+                                    grouped
+                                      ? "rounded-2xl rounded-tr-md"
+                                      : "rounded-2xl rounded-tr-sm"
+                                  }`
+                            }`}
+                          >
+                            {msg.content}
+                          </div>
+
+                          {/* Meta row */}
+                          {!grouped && (
+                            <div className={`flex items-center gap-1.5 px-1 ${inbound ? "justify-start" : "justify-end"}`}>
+                              <span className="text-[10px] text-zinc-600">
+                                {formatMessageTime(msg.createdAt)}
+                              </span>
+                              {isAi && (
+                                <span className="flex items-center gap-0.5 text-[10px] text-indigo-500/70">
+                                  <Bot className="size-2.5" /> IA
+                                </span>
+                              )}
+                              {isHuman && (
+                                <span className="flex items-center gap-0.5 text-[10px] text-zinc-500">
+                                  <UserRound className="size-2.5" /> humano
+                                </span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Outbound avatar placeholder */}
+                        {!inbound && (
+                          <div className={`ml-2 mt-auto ${grouped ? "invisible" : ""}`}>
+                            <div className={`grid size-7 shrink-0 place-items-center rounded-full ring-1 ${
+                              isAi
+                                ? "bg-indigo-500/15 ring-indigo-500/20 text-indigo-400"
+                                : "bg-zinc-800 ring-zinc-700/50 text-zinc-400"
+                            } text-xs font-semibold`}>
+                              {isAi ? <Bot className="size-3.5" /> : <UserRound className="size-3.5" />}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {sending && (
+                  <div className="mt-3 flex justify-end">
+                    <div className="mr-9">
+                      <TypingIndicator />
                     </div>
                   </div>
-                );
-              })}
+                )}
 
-              {(typing || updateLead.isPending) && (
-                <div className="text-xs text-zinc-500">Digitando...</div>
-              )}
+                <div ref={messagesEndRef} />
+              </div>
             </div>
 
+            {/* Input */}
             <form
-              className="flex items-center gap-2 border-t border-zinc-800 p-4"
               onSubmit={sendManualMessage}
+              className="flex items-center gap-2 border-t border-zinc-800/60 px-4 py-3"
             >
-              <Input
-                placeholder="Responder manualmente..."
-                value={manualMessage}
-                onChange={(event) => setManualMessage(event.target.value)}
-              />
-              <Button type="submit" size="icon" disabled={!manualMessage.trim() || typing}>
-                <Send className="size-4" />
+              <div className="flex-1 relative">
+                <Input
+                  placeholder={lead?.aiEnabled ? "Mensagem manual (IA está respondendo)..." : "Responder..."}
+                  value={manualMessage}
+                  onChange={(e) => setManualMessage(e.target.value)}
+                  className="pr-10"
+                  disabled={sending}
+                />
+              </div>
+              <Button
+                type="submit"
+                size="icon"
+                variant="secondary"
+                disabled={!manualMessage.trim() || sending}
+                className="shrink-0"
+              >
+                <Send className="size-3.5" />
               </Button>
             </form>
           </>
         )}
-      </Card>
+      </div>
     </div>
   );
 }
-

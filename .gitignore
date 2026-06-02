@@ -34,6 +34,9 @@ yarn-error.log*
 # local bridge runtime
 .baileys/
 
+# Claude Code local config
+.claude/
+
 # vercel
 .vercel
 

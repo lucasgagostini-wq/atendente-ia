@@ -5,15 +5,17 @@
 :root {
   --background: 9 9 11;
   --foreground: 244 244 245;
-  --card: 18 18 20;
+  --card: 15 15 17;
+  --card-border: 39 39 42;
   --muted: 113 113 122;
-  --border: 39 39 42;
-  --primary: 96 165 250;
-  --radius: 0.5rem;
+  --primary: 99 102 241;
+  --primary-glow: rgba(99, 102, 241, 0.15);
+  --radius: 0.625rem;
+  --sidebar-w: 248px;
 }
 
 * {
-  @apply border-zinc-800;
+  @apply border-zinc-800/60;
 }
 
 html,
@@ -22,48 +24,226 @@ body {
 }
 
 body {
-  @apply bg-zinc-950 text-zinc-100;
+  @apply bg-zinc-950 text-zinc-100 antialiased;
 }
 
-.glass {
-  background: rgba(24, 24, 27, 0.7);
-  backdrop-filter: blur(8px);
-}
-
+/* ─── Scrollbar ─────────────────────────────────── */
 .scrollbar-thin::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
-
+.scrollbar-thin::-webkit-scrollbar-track {
+  background: transparent;
+}
 .scrollbar-thin::-webkit-scrollbar-thumb {
-  background-color: rgba(113, 113, 122, 0.6);
-  border-radius: 9999px;
+  background: rgba(63, 63, 70, 0.8);
+  border-radius: 999px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb:hover {
+  background: rgba(82, 82, 91, 0.9);
 }
 
+/* ─── Subtle grid background ─────────────────────── */
 .grid-bg {
-  background-image: linear-gradient(
-      to right,
-      rgba(39, 39, 42, 0.35) 1px,
-      transparent 1px
-    ),
-    linear-gradient(to bottom, rgba(39, 39, 42, 0.35) 1px, transparent 1px);
-  background-size: 24px 24px;
+  background-image:
+    radial-gradient(ellipse 80% 60% at 50% -10%, rgba(99, 102, 241, 0.06) 0%, transparent 60%),
+    linear-gradient(to right, rgba(39, 39, 42, 0.25) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(39, 39, 42, 0.25) 1px, transparent 1px);
+  background-size: 100% 100%, 28px 28px, 28px 28px;
 }
 
+/* ─── Glass ──────────────────────────────────────── */
+.glass {
+  background: rgba(15, 15, 17, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.glass-sidebar {
+  background: rgba(10, 10, 12, 0.92);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+}
+
+/* ─── Gradient borders ──────────────────────────── */
+.border-gradient {
+  position: relative;
+}
+.border-gradient::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(39, 39, 42, 0.8), rgba(39, 39, 42, 0.3));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* ─── Glow effects ──────────────────────────────── */
+.glow-blue {
+  box-shadow: 0 0 20px rgba(99, 102, 241, 0.15), 0 0 40px rgba(99, 102, 241, 0.05);
+}
+
+.glow-green {
+  box-shadow: 0 0 16px rgba(52, 211, 153, 0.12);
+}
+
+/* ─── Card shine effect on hover ─────────────────── */
+.card-shine {
+  position: relative;
+  overflow: hidden;
+}
+.card-shine::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  background: linear-gradient(
+    135deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.02) 50%,
+    transparent 70%
+  );
+  transition: opacity 0.3s;
+}
+.card-shine:hover::after {
+  opacity: 1;
+}
+
+/* ─── Typing dots animation ─────────────────────── */
+@keyframes typing-dot {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-4px); opacity: 1; }
+}
+
+.typing-dot {
+  animation: typing-dot 1.4s infinite ease-in-out;
+}
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+/* ─── Ambient background animations ────────────── */
+@keyframes ambient-drift-1 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33%       { transform: translate(3%, 2%) scale(1.05); }
+  66%       { transform: translate(-2%, 3%) scale(0.97); }
+}
+@keyframes ambient-drift-2 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  40%       { transform: translate(-4%, -3%) scale(1.08); }
+  70%       { transform: translate(2%, -1%) scale(0.95); }
+}
+@keyframes ambient-drift-3 {
+  0%, 100% { transform: translate(0, 0); }
+  50%       { transform: translate(4%, 4%); }
+}
+
+.ambient-aura-1 { animation: ambient-drift-1 28s ease-in-out infinite; }
+.ambient-aura-2 { animation: ambient-drift-2 35s ease-in-out infinite; }
+.ambient-aura-3 { animation: ambient-drift-3 22s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ambient-aura-1,
+  .ambient-aura-2,
+  .ambient-aura-3 { animation: none; }
+}
+
+/* ─── Fade-in animation ─────────────────────────── */
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in-up {
+  animation: fade-in-up 0.2s ease-out forwards;
+}
+
+/* ─── Shimmer skeleton ──────────────────────────── */
+@keyframes shimmer {
+  0% { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(39, 39, 42, 0.5) 0%,
+    rgba(63, 63, 70, 0.6) 40%,
+    rgba(39, 39, 42, 0.5) 80%
+  );
+  background-size: 200% auto;
+  animation: shimmer 1.8s linear infinite;
+  border-radius: 6px;
+}
+
+/* ─── Active nav pill ───────────────────────────── */
+.nav-active-indicator {
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 60%;
+  border-radius: 0 2px 2px 0;
+  background: linear-gradient(to bottom, #818cf8, #6366f1);
+}
+
+/* ─── Status dot pulse ──────────────────────────── */
+@keyframes status-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(0.85); }
+}
+
+.status-pulse {
+  animation: status-pulse 2.5s ease-in-out infinite;
+}
+
+/* ─── Message bubble appear ─────────────────────── */
+@keyframes bubble-in {
+  from { opacity: 0; transform: scale(0.94) translateY(4px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+.bubble-in {
+  animation: bubble-in 0.18s ease-out forwards;
+}
+
+/* ─── Typography ─────────────────────────────────── */
 @layer base {
   h1 {
     @apply text-2xl font-semibold tracking-tight text-zinc-50;
+    letter-spacing: -0.025em;
   }
   h2 {
     @apply text-xl font-semibold tracking-tight text-zinc-100;
+    letter-spacing: -0.02em;
   }
   h3 {
-    @apply text-lg font-medium text-zinc-200;
+    @apply text-base font-medium text-zinc-200;
   }
 }
 
 @layer utilities {
-  .text-balance {
-    text-wrap: balance;
+  .text-balance { text-wrap: balance; }
+
+  .bg-card-elevated {
+    background: rgba(24, 24, 27, 0.8);
+  }
+
+  .shadow-card {
+    box-shadow:
+      0 1px 3px rgba(0, 0, 0, 0.4),
+      0 4px 16px rgba(0, 0, 0, 0.2),
+      inset 0 1px 0 rgba(255, 255, 255, 0.03);
+  }
+
+  .shadow-card-hover {
+    box-shadow:
+      0 2px 8px rgba(0, 0, 0, 0.5),
+      0 8px 32px rgba(0, 0, 0, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.04);
   }
 }

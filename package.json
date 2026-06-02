@@ -7,14 +7,18 @@
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "next lint",
-    "bridge:baileys": "node scripts/baileys-bridge.mjs",
+    "check": "npm run lint && npm run build",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev --name init",
+    "db:push": "prisma db push",
     "db:seed": "prisma db seed",
-    "setup": "node scripts/setup.mjs"
+    "db:studio": "prisma studio",
+    "setup": "node scripts/setup.mjs",
+    "bridge:baileys": "node scripts/baileys-bridge.mjs"
   },
   "dependencies": {
     "@hapi/boom": "^10.0.1",
+    "@phosphor-icons/react": "^2.1.10",
     "@prisma/client": "^5.22.0",
     "@supabase/supabase-js": "^2.106.2",
     "@tanstack/react-query": "^5.100.14",
@@ -27,6 +31,7 @@
     "date-fns": "^4.4.0",
     "express": "^5.2.1",
     "framer-motion": "^12.40.0",
+    "jose": "^6.2.3",
     "lucide-react": "^1.17.0",
     "next": "^14.2.33",
     "prisma": "^5.22.0",
