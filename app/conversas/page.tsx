@@ -499,6 +499,7 @@ export default function ConversasPage() {
                 variant="secondary"
                 disabled={!manualMessage.trim() || sending}
                 className="shrink-0"
+                aria-label="Enviar mensagem"
               >
                 <Send className="size-3.5" />
               </Button>
