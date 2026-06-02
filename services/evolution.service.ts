@@ -1,5 +1,5 @@
 import axios, { AxiosInstance } from "axios";
-import { prisma } from "@/lib/prisma";
+import { getSettings } from "@/lib/settings-cache";
 import { randomBetween, sleep } from "@/lib/utils";
 
 type SendMediaPayload = {
@@ -13,18 +13,10 @@ type SendOptions = {
 };
 
 class EvolutionService {
-  private async getSettings() {
-    return prisma.settings.upsert({
-      where: { id: "default" },
-      update: {},
-      create: {
-        id: "default",
-      },
-    });
-  }
+
 
   private async getClient() {
-    const settings = await this.getSettings();
+    const settings = await getSettings();
     const baseURL =
       settings.evolutionApiUrl || process.env.EVOLUTION_API_URL || "";
     const apiKey = settings.evolutionApiKey || process.env.EVOLUTION_API_KEY || "";
@@ -128,7 +120,7 @@ class EvolutionService {
   }
 
   async simulateTyping() {
-    const settings = await this.getSettings();
+    const settings = await getSettings();
     const minDelay = settings.minDelaySeconds ?? 2;
     const maxDelay = settings.maxDelaySeconds ?? 8;
     await sleep(randomBetween(minDelay, maxDelay) * 1000);

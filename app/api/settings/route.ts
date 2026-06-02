@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { settingsSchema } from "@/lib/validations";
+import { getSettings, invalidateSettingsCache } from "@/lib/settings-cache";
 
 export const dynamic = "force-dynamic";
 
@@ -15,12 +16,7 @@ function toActorId(value?: string | null) {
 }
 
 export async function GET() {
-  const settings = await prisma.settings.upsert({
-    where: { id: "default" },
-    update: {},
-    create: { id: "default" },
-  });
-
+  const settings = await getSettings();
   return NextResponse.json(settings);
 }
 
@@ -71,6 +67,9 @@ export async function PATCH(request: Request) {
         defaultCheckoutUrl: toNullable(data.defaultCheckoutUrl) ?? undefined,
       },
     });
+
+    // Invalidar cache para que a próxima requisição busque os dados atualizados
+    invalidateSettingsCache();
 
     return NextResponse.json(settings);
   } catch (error) {

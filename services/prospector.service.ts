@@ -1,6 +1,7 @@
 import { ApifyClient } from "apify-client";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { getSettings } from "@/lib/settings-cache";
 
 type CreateProspectingJobInput = {
   query: string;
@@ -15,13 +16,6 @@ type ImportProspectingLeadsInput = {
 type RawMapsItem = Record<string, unknown>;
 
 class ProspectorService {
-  private async getSettings() {
-    return prisma.settings.upsert({
-      where: { id: "default" },
-      update: {},
-      create: { id: "default" },
-    });
-  }
 
   private normalizePhone(phone: string | null | undefined) {
     if (!phone) return null;
@@ -124,7 +118,7 @@ class ProspectorService {
     });
 
     try {
-      const settings = await this.getSettings();
+      const settings = await getSettings();
       const apifyApiToken = settings.apifyApiToken || process.env.APIFY_API_TOKEN;
       const actorId =
         settings.prospectorMapsActorId ||

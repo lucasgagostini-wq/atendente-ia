@@ -32,7 +32,11 @@ export function useConversation(id?: string) {
     queryKey: ["conversation", id],
     queryFn: () => request<Conversation>(`/api/conversations/${id}`),
     enabled: Boolean(id),
-    refetchInterval: 3000,
+    // 8s é suficiente para perceber mensagens novas sem sobrecarregar o banco
+    refetchInterval: 8_000,
+    // Não refaz ao focar a aba se a última busca foi há menos de 5s
+    refetchOnWindowFocus: false,
+    staleTime: 5_000,
   });
 }
 

@@ -1,4 +1,5 @@
 import axios from "axios";
+import { getSettings } from "@/lib/settings-cache";
 import { prisma } from "@/lib/prisma";
 
 type ChatMessage = {
@@ -14,20 +15,14 @@ type GenerateArgs = {
 };
 
 class OpenRouterService {
-  private async getSettings() {
-    return prisma.settings.upsert({
-      where: { id: "default" },
-      update: {},
-      create: { id: "default" },
-    });
-  }
+
 
   private mockResponse() {
     return "Perfeito, entendi. Me diz só uma coisa: hoje seu foco é vender mais ou melhorar o suporte primeiro?";
   }
 
   async generateResponse(args: GenerateArgs) {
-    const settings = await this.getSettings();
+    const settings = await getSettings();
     const apiKey = settings.openRouterApiKey || process.env.OPENROUTER_API_KEY;
     const model =
       args.model || settings.openRouterModel || "deepseek/deepseek-chat";
