@@ -102,6 +102,8 @@ body {
   position: absolute;
   inset: 0;
   opacity: 0;
+  /* Essencial: sem isso o pseudo-elemento intercepta todos os cliques dentro do card */
+  pointer-events: none;
   background: linear-gradient(
     135deg,
     transparent 30%,
