@@ -56,6 +56,32 @@ function normalizePhone(raw) {
   return String(raw || "").replace(/\D/g, "");
 }
 
+function readJsonFile(filePath) {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function resolvePhoneFromJid(jid) {
+  const raw = String(jid || "");
+  const [id, server] = raw.split("@");
+  const digits = normalizePhone(id);
+
+  if (!digits) return "";
+
+  if (server === "lid") {
+    const reverseMap = readJsonFile(
+      path.join(authDir, `lid-mapping-${digits}_reverse.json`),
+    );
+    const resolved = normalizePhone(reverseMap);
+    return resolved || "";
+  }
+
+  return digits;
+}
+
 function toJid(phone) {
   const digits = normalizePhone(phone);
   if (!digits) return "";
@@ -231,14 +257,19 @@ async function startSocket(options = {}) {
         if (!message?.message || message.key?.fromMe) continue;
         if (!message.key?.remoteJid || message.key.remoteJid.endsWith("@g.us")) continue;
 
+        const phone = resolvePhoneFromJid(message.key.remoteJid);
+
         await emitWebhook({
           event: "MESSAGES_UPSERT",
           data: {
+            phone,
             key: {
               remoteJid: message.key.remoteJid,
+              id: message.key.id || null,
               fromMe: false,
             },
             message: message.message,
+            messageTimestamp: message.messageTimestamp || null,
             pushName: message.pushName || null,
           },
         });

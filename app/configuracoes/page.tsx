@@ -25,8 +25,8 @@ import { Select } from "@/components/ui/select";
 import { SectionHeader } from "@/components/ui/section-header";
 
 const modelOptions = [
-  { label: "google/gemma-4-31b-it:free", value: "google/gemma-4-31b-it:free" },
   { label: "openai/gpt-oss-20b:free", value: "openai/gpt-oss-20b:free" },
+  { label: "google/gemma-4-31b-it:free", value: "google/gemma-4-31b-it:free" },
   { label: "qwen/qwen3-next-80b-a3b-instruct:free", value: "qwen/qwen3-next-80b-a3b-instruct:free" },
   { label: "deepseek/deepseek-chat", value: "deepseek/deepseek-chat" },
   { label: "qwen/qwen-2.5-72b-instruct", value: "qwen/qwen-2.5-72b-instruct" },

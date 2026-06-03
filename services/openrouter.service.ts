@@ -14,13 +14,51 @@ type GenerateArgs = {
   maxTokens?: number;
 };
 
-const FREE_FALLBACK_MODEL = "google/gemma-4-31b-it:free";
+const FREE_FALLBACK_MODEL = "openai/gpt-oss-20b:free";
 
 class OpenRouterService {
 
 
   private mockResponse() {
     return "Perfeito, entendi. Me diz só uma coisa: hoje seu foco é vender mais ou melhorar o suporte primeiro?";
+  }
+
+  private async requestCompletion(args: {
+    apiKey: string;
+    model: string;
+    messages: ChatMessage[];
+    temperature: number;
+    maxTokens?: number;
+  }) {
+    const { data } = await axios.post(
+      "https://openrouter.ai/api/v1/chat/completions",
+      {
+        model: args.model,
+        temperature: args.temperature,
+        max_tokens: args.maxTokens ?? 400,
+        messages: args.messages,
+      },
+      {
+        timeout: 20_000,
+        headers: {
+          Authorization: `Bearer ${args.apiKey}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
+          "X-Title": "Atendente IA",
+        },
+      },
+    );
+
+    const output = data?.choices?.[0]?.message?.content?.trim();
+    if (!output) {
+      throw new Error("OpenRouter retornou resposta vazia.");
+    }
+
+    return {
+      output,
+      usage: data?.usage ?? null,
+      finishReason: data?.choices?.[0]?.finish_reason,
+    };
   }
 
   async generateResponse(args: GenerateArgs) {
@@ -41,70 +79,60 @@ class OpenRouterService {
       };
     }
 
-    try {
-      const { data } = await axios.post(
-        "https://openrouter.ai/api/v1/chat/completions",
-        {
-          model,
-          temperature,
-          max_tokens: args.maxTokens ?? 400,
+    const modelsToTry = Array.from(new Set([model, FREE_FALLBACK_MODEL]));
+
+    for (const candidateModel of modelsToTry) {
+      try {
+        const generated = await this.requestCompletion({
+          apiKey,
+          model: candidateModel,
           messages: args.messages,
-        },
-        {
-          timeout: 20_000,
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            "Content-Type": "application/json",
-            "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
-            "X-Title": "Atendente IA",
-          },
-        },
-      );
+          temperature,
+          maxTokens: args.maxTokens,
+        });
 
-      const output = data?.choices?.[0]?.message?.content?.trim();
-      if (!output) {
-        throw new Error("OpenRouter retornou resposta vazia.");
+        await prisma.log.create({
+          data: {
+            type: "OPENROUTER_RESPONSE",
+            message: `Modelo ${candidateModel} respondeu com sucesso`,
+            payload: {
+              usage: generated.usage,
+              finishReason: generated.finishReason,
+              recoveredFromModel: candidateModel === model ? null : model,
+            },
+          },
+        });
+
+        return {
+          output: generated.output,
+          model: candidateModel,
+          usage: generated.usage,
+        };
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Erro desconhecido no OpenRouter";
+
+        await prisma.log.create({
+          data: {
+            type: "OPENROUTER_ERROR",
+            message,
+            payload: {
+              model: candidateModel,
+              primaryModel: model,
+            },
+          },
+        });
       }
-
-      await prisma.log.create({
-        data: {
-          type: "OPENROUTER_RESPONSE",
-          message: `Modelo ${model} respondeu com sucesso`,
-          payload: {
-            usage: data?.usage,
-            finishReason: data?.choices?.[0]?.finish_reason,
-          },
-        },
-      });
-
-      return {
-        output,
-        model,
-        usage: data?.usage ?? null,
-      };
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Erro desconhecido no OpenRouter";
-
-      await prisma.log.create({
-        data: {
-          type: "OPENROUTER_ERROR",
-          message,
-          payload: {
-            model,
-          },
-        },
-      });
-
-      return {
-        output:
-          "Tive uma instabilidade rápida aqui. Quer que eu te mande um resumo objetivo da oferta e valores?",
-        model,
-        usage: null,
-        fallback: true,
-        error: message,
-      };
     }
+
+    return {
+      output:
+        "Tive uma instabilidade rápida aqui. Quer que eu te mande um resumo objetivo da oferta e valores?",
+      model,
+      usage: null,
+      fallback: true,
+      error: "Todos os modelos configurados falharam.",
+    };
   }
 }
 

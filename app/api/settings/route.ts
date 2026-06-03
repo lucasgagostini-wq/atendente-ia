@@ -6,7 +6,7 @@ import { getSettings, invalidateSettingsCache } from "@/lib/settings-cache";
 export const dynamic = "force-dynamic";
 
 const DEFAULT_OPENROUTER_MODEL =
-  process.env.OPENROUTER_DEFAULT_MODEL || "google/gemma-4-31b-it:free";
+  process.env.OPENROUTER_DEFAULT_MODEL || "openai/gpt-oss-20b:free";
 
 function toNullable(value?: string | null) {
   if (value === undefined) return undefined;

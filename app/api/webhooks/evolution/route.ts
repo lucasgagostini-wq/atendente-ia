@@ -29,9 +29,9 @@ type IncomingPayload = {
 
 // ── Helpers ────────────────────────────────────────────────────
 
-/** Remove todos os não-dígitos e sufixo @s.whatsapp.net */
+/** Remove todos os não-dígitos de telefones/JIDs do WhatsApp */
 function normalizePhone(raw: string): string {
-  return raw.replace(/\D/g, "").replace(/@s\.whatsapp\.net$/, "");
+  return raw.replace(/\D/g, "");
 }
 
 /** Extrai os campos relevantes do payload da Evolution API / Baileys */
@@ -54,6 +54,12 @@ function extractIncomingPayload(payload: any): IncomingPayload | null {
     payload?.sender ||
     payload?.from ||
     "";
+  const payloadPhone =
+    payload?.data?.phone ||
+    payload?.phone ||
+    payload?.data?.number ||
+    payload?.number ||
+    "";
 
   // Ignorar se não tem remetente ou é mensagem própria
   if (!remoteJid) return null;
@@ -75,8 +81,11 @@ function extractIncomingPayload(payload: any): IncomingPayload | null {
   if (messageNode?.imageMessage) type = "IMAGE";
   if (messageNode?.audioMessage) type = "AUDIO";
 
+  const phone = normalizePhone(payloadPhone || remoteJid);
+  if (!phone) return null;
+
   return {
-    phone: normalizePhone(remoteJid),
+    phone,
     text: text.trim(),
     messageId: keyNode?.id ?? null,
     type,
@@ -84,6 +93,8 @@ function extractIncomingPayload(payload: any): IncomingPayload | null {
     metadata: {
       event: payload?.event || payload?.data?.event || null,
       key: keyNode ?? null,
+      remoteJid,
+      resolvedPhone: phone,
     } as Prisma.InputJsonValue,
   };
 }

@@ -373,7 +373,7 @@ export default function ConversasPage() {
                   <p className="py-12 text-center text-sm text-zinc-600">Nenhuma mensagem ainda.</p>
                 )}
 
-                {[...messages].reverse().map((msg, i, arr) => {
+                {messages.map((msg, i, arr) => {
                   const prev = arr[i - 1];
                   const inbound = msg.direction === "INBOUND";
                   const grouped = isGrouped(msg, prev);
