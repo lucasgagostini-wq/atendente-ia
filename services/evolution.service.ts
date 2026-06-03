@@ -1,6 +1,6 @@
 import axios, { AxiosInstance } from "axios";
 import { getSettings } from "@/lib/settings-cache";
-import { randomBetween, sleep } from "@/lib/utils";
+import { prisma } from "@/lib/prisma";
 
 type SendMediaPayload = {
   phone: string;
@@ -134,10 +134,55 @@ class EvolutionService {
   }
 
   async simulateTyping() {
-    const settings = await getSettings();
-    const minDelay = settings.minDelaySeconds ?? 2;
-    const maxDelay = settings.maxDelaySeconds ?? 8;
-    await sleep(randomBetween(minDelay, maxDelay) * 1000);
+    return;
+  }
+
+  async sendTypingPresence(number: string, delayMs: number): Promise<void> {
+    const { client, instance, isConfigured } = await this.getClient(5_000);
+    const normalizedNumber = number.replace(/\D/g, "");
+
+    if (!normalizedNumber || !isConfigured || !client) {
+      return;
+    }
+
+    try {
+      await client.post(`/chat/sendPresence/${instance}`, {
+        number: normalizedNumber,
+        options: {
+          delay: delayMs,
+          number: normalizedNumber,
+        },
+      });
+
+      await prisma.log.create({
+        data: {
+          type: "WHATSAPP_TYPING_PRESENCE",
+          message: `Typing presence enviado para ${normalizedNumber}`,
+          payload: {
+            number: normalizedNumber,
+            delayMs,
+            instance,
+          },
+        },
+      });
+    } catch (error) {
+      await prisma.log.create({
+        data: {
+          type: "WHATSAPP_TYPING_PRESENCE_ERROR",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Erro desconhecido ao enviar typing presence",
+          payload: {
+            number: normalizedNumber,
+            delayMs,
+            instance,
+            status: axios.isAxiosError(error) ? error.response?.status ?? null : null,
+            detail: axios.isAxiosError(error) ? error.response?.data ?? null : null,
+          },
+        },
+      }).catch(() => {});
+    }
   }
 
   async sendText(phone: string, text: string) {
@@ -166,12 +211,10 @@ class EvolutionService {
       };
     }
 
-    await this.simulateTyping();
-
     const payload = {
       number: phone.replace(/\D/g, ""),
       text,
-      delay: 1200,
+      delay: 0,
       linkPreview: true,
     };
 

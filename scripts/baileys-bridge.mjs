@@ -89,6 +89,27 @@ function toJid(phone) {
   return `${digits}@s.whatsapp.net`;
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function sendTypingPresence(number, delayMs = 3000) {
+  if (!socket || socketState !== "open") return false;
+
+  const jid = toJid(number);
+  if (!jid) return false;
+
+  await socket.sendPresenceUpdate("composing", jid);
+
+  if (delayMs > 0) {
+    setTimeout(() => {
+      socket?.sendPresenceUpdate?.("paused", jid).catch(() => {});
+    }, delayMs).unref?.();
+  }
+
+  return true;
+}
+
 function markPairingReady() {
   pairingReadyAt = Date.now();
   const waiters = pairingReadyWaiters;
@@ -261,6 +282,22 @@ async function startSocket(options = {}) {
         if (!message.key?.remoteJid || message.key.remoteJid.endsWith("@g.us")) continue;
 
         const phone = resolvePhoneFromJid(message.key.remoteJid);
+        const typingStartedAt = Date.now();
+        const presenceNumber = phone || resolvePhoneFromJid(message.key.remoteJid);
+        let presenceInterval = null;
+
+        if (presenceNumber) {
+          sendTypingPresence(presenceNumber, 3000).catch((error) => {
+            console.error("[baileys-bridge] typing presence error:", error);
+          });
+
+          presenceInterval = setInterval(() => {
+            sendTypingPresence(presenceNumber, 3000).catch((error) => {
+              console.error("[baileys-bridge] typing presence renew error:", error);
+            });
+          }, 4000);
+          presenceInterval.unref?.();
+        }
 
         const webhookResponse = await emitWebhook({
           event: "MESSAGES_UPSERT",
@@ -277,11 +314,21 @@ async function startSocket(options = {}) {
             pushName: message.pushName || null,
           },
         });
+        if (presenceInterval) clearInterval(presenceInterval);
 
         const replyText = String(webhookResponse?.reply?.text || "").trim();
         const replyPhone = normalizePhone(webhookResponse?.reply?.phone || phone);
+        const typingDelayMs = Number(webhookResponse?.reply?.typingDelayMs || 0);
 
         if (replyText && replyPhone && socketState === "open") {
+          const elapsedMs = Date.now() - typingStartedAt;
+          const remainingDelayMs = Math.max(0, typingDelayMs - elapsedMs);
+          if (remainingDelayMs > 0) {
+            await sendTypingPresence(replyPhone, remainingDelayMs).catch((error) => {
+              console.error("[baileys-bridge] final typing presence error:", error);
+            });
+            await sleep(remainingDelayMs);
+          }
           await sock.sendMessage(toJid(replyPhone), { text: replyText });
         }
       }
@@ -514,6 +561,50 @@ app.post("/message/sendText/:instance", async (req, res) => {
       response: {
         message: [
           error instanceof Error ? error.message : "failed to send message",
+        ],
+      },
+    });
+  }
+});
+
+app.post("/chat/sendPresence/:instance", async (req, res) => {
+  const mismatch = ensureInstance(req.params.instance);
+  if (mismatch) {
+    res.status(mismatch.status).json(mismatch.payload);
+    return;
+  }
+
+  const number = normalizePhone(req.body?.number || req.body?.options?.number);
+  const delay = Number(req.body?.options?.delay || req.body?.delay || 3000);
+
+  if (!number) {
+    res.status(400).json({
+      status: 400,
+      error: "Bad Request",
+      response: { message: ["number is required"] },
+    });
+    return;
+  }
+
+  if (!socket || socketState !== "open") {
+    res.status(409).json({
+      status: 409,
+      error: "Conflict",
+      response: { message: ["instance is not connected"] },
+    });
+    return;
+  }
+
+  try {
+    await sendTypingPresence(number, Number.isFinite(delay) ? delay : 3000);
+    res.json({ presence: "composing", number, delay });
+  } catch (error) {
+    res.status(500).json({
+      status: 500,
+      error: "Internal Server Error",
+      response: {
+        message: [
+          error instanceof Error ? error.message : "failed to send presence",
         ],
       },
     });

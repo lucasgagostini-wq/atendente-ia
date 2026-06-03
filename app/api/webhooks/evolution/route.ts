@@ -13,7 +13,18 @@ import { evolutionService } from "@/services/evolution.service";
 import { leadService } from "@/services/lead.service";
 import { openRouterService } from "@/services/openrouter.service";
 import { promptService } from "@/services/prompt.service";
-import { sanitizeAIResponse, validatePromptMaster } from "@/services/ai-safety.service";
+import {
+  safeFallbackForStage,
+  sanitizeAIResponse,
+  validatePromptMaster,
+} from "@/services/ai-safety.service";
+import {
+  AI_RESPONSE_TIMEOUT_MS,
+  INCOMING_MESSAGE_DEBOUNCE_MS,
+  calculateTypingDelay,
+  remainingTypingDelay,
+  sleep,
+} from "@/lib/typing-delay";
 
 export const dynamic = "force-dynamic";
 
@@ -114,6 +125,29 @@ function shouldTransferToHuman(message: string): boolean {
   return /(humano|atendente|pessoa real|suporte humano|falar com algu[eé]m|quero falar com)/i.test(message);
 }
 
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | null = null;
+
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<T>((resolve) => {
+        timeout = setTimeout(() => {
+          resolve({
+            output: safeFallbackForStage("needs_photo"),
+            model: "safe-fallback/timeout",
+            usage: null,
+            fallback: true,
+            error: `AI response timeout after ${timeoutMs}ms`,
+          } as T);
+        }, timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
 // ── Handler ────────────────────────────────────────────────────
 
 export async function POST(request: Request) {
@@ -162,7 +196,7 @@ export async function POST(request: Request) {
     const conversation = await conversationService.getOrCreateOpenConversation(lead.id);
 
     // ── Salvar mensagem recebida ─────────────────────────────
-    await conversationService.saveMessage({
+    const inboundMessage = await conversationService.saveMessage({
       conversationId: conversation.id,
       leadId: lead.id,
       direction: "INBOUND",
@@ -171,6 +205,11 @@ export async function POST(request: Request) {
       content: incoming.text,
       metadata: incoming.metadata,
     });
+    const typingStartedAt = Date.now();
+
+    if (incoming.replyTransport !== "baileys_bridge") {
+      evolutionService.sendTypingPresence(lead.phone, 3000).catch(() => {});
+    }
 
     // ── Log assíncrono (não bloqueia o fluxo) ───────────────
     prisma.log.create({
@@ -196,13 +235,23 @@ export async function POST(request: Request) {
         content: transferText,
         metadata: {} as Prisma.InputJsonValue,
       });
+      const typingDelayMs = calculateTypingDelay(transferText);
+      const waitBeforeSendMs = remainingTypingDelay({
+        calculatedDelayMs: typingDelayMs,
+        elapsedMs: Date.now() - typingStartedAt,
+      });
 
       if (incoming.replyTransport === "baileys_bridge") {
         return NextResponse.json({
           ok: true,
           transferred: true,
-          reply: { phone: lead.phone, text: transferText },
+          reply: { phone: lead.phone, text: transferText, typingDelayMs },
         });
+      }
+
+      if (waitBeforeSendMs > 0) {
+        await evolutionService.sendTypingPresence(lead.phone, waitBeforeSendMs);
+        await sleep(waitBeforeSendMs);
       }
 
       const sent = await evolutionService.sendTextStrict(lead.phone, transferText).catch((e) => ({
@@ -215,6 +264,43 @@ export async function POST(request: Request) {
     // ── IA desativada para este lead ─────────────────────────
     if (!lead.aiEnabled || lead.humanTakeover) {
       return NextResponse.json({ ok: true, aiSkipped: true });
+    }
+
+    if (INCOMING_MESSAGE_DEBOUNCE_MS > 0) {
+      await sleep(INCOMING_MESSAGE_DEBOUNCE_MS);
+
+      const newerInboundMessage = await prisma.message.findFirst({
+        where: {
+          conversationId: conversation.id,
+          leadId: lead.id,
+          direction: "INBOUND",
+          createdAt: { gt: inboundMessage.createdAt },
+        },
+        select: { id: true, createdAt: true },
+        orderBy: { createdAt: "desc" },
+      });
+
+      if (newerInboundMessage) {
+        await prisma.log.create({
+          data: {
+            type: "WHATSAPP_MESSAGE_DEBOUNCED",
+            message: "Resposta adiada porque chegaram mensagens mais novas do mesmo lead",
+            payload: {
+              leadId: lead.id,
+              conversationId: conversation.id,
+              messageId: inboundMessage.id,
+              newerMessageId: newerInboundMessage.id,
+              debounceMs: INCOMING_MESSAGE_DEBOUNCE_MS,
+            },
+          },
+        });
+
+        return NextResponse.json({
+          ok: true,
+          debounced: true,
+          reason: "newer_message_received",
+        });
+      }
     }
 
     // ── Resposta da IA ───────────────────────────────────────
@@ -240,7 +326,15 @@ export async function POST(request: Request) {
       });
     }
 
-    const aiResponse = await openRouterService.generateResponse({
+    let renewPresenceTimer: ReturnType<typeof setInterval> | null = null;
+
+    if (incoming.replyTransport !== "baileys_bridge") {
+      renewPresenceTimer = setInterval(() => {
+        evolutionService.sendTypingPresence(lead.phone, 3000).catch(() => {});
+      }, 4000);
+    }
+
+    const aiResponse = await withTimeout(openRouterService.generateResponse({
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: incoming.text },
@@ -251,11 +345,35 @@ export async function POST(request: Request) {
         recentHistory,
         hasPhoto: incoming.type === "IMAGE",
       },
-    });
+    }), AI_RESPONSE_TIMEOUT_MS);
+
+    if (renewPresenceTimer) clearInterval(renewPresenceTimer);
+
+    if (aiResponse.model === "safe-fallback/timeout") {
+      await prisma.log.create({
+        data: {
+          type: "AI_FALLBACK_USED",
+          message: "Timeout da IA; fallback humano seguro aplicado",
+          payload: {
+            leadId: lead.id,
+            conversationId: conversation.id,
+            timeoutMs: AI_RESPONSE_TIMEOUT_MS,
+            finalResponse: aiResponse.output,
+          },
+        },
+      });
+    }
+
     const safeResponse = sanitizeAIResponse(aiResponse.output, {
       incomingText: incoming.text,
       recentHistory,
       hasPhoto: incoming.type === "IMAGE",
+    });
+    const typingDelayMs = calculateTypingDelay(safeResponse.output);
+    const elapsedSinceTypingStartedMs = Date.now() - typingStartedAt;
+    const waitBeforeSendMs = remainingTypingDelay({
+      calculatedDelayMs: typingDelayMs,
+      elapsedMs: elapsedSinceTypingStartedMs,
     });
 
     if (safeResponse.blocked) {
@@ -291,6 +409,9 @@ export async function POST(request: Request) {
         sanitizeReason: safeResponse.reason ?? null,
         promptValidationMissing: promptValidation.missing,
         replyTransport: incoming.replyTransport,
+        typingDelayMs,
+        waitBeforeSendMs,
+        elapsedSinceTypingStartedMs,
       } as Prisma.InputJsonValue,
     });
 
@@ -298,8 +419,13 @@ export async function POST(request: Request) {
       return NextResponse.json({
         ok: true,
         response: safeResponse.output,
-        reply: { phone: lead.phone, text: safeResponse.output },
+        reply: { phone: lead.phone, text: safeResponse.output, typingDelayMs },
       });
+    }
+
+    if (waitBeforeSendMs > 0) {
+      await evolutionService.sendTypingPresence(lead.phone, waitBeforeSendMs);
+      await sleep(waitBeforeSendMs);
     }
 
     const sent = await evolutionService.sendTextStrict(lead.phone, safeResponse.output);
