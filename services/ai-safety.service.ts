@@ -63,6 +63,26 @@ function compactText(context: SafetyContext) {
     .toLowerCase();
 }
 
+function hasCommercialCTA(response: string) {
+  return [
+    /\?$/,
+    /quer que eu/i,
+    /quer começar|quer comecar|quer fazer/i,
+    /posso te passar|posso deixar separado/i,
+    /me manda a foto|manda a foto|me envia/i,
+    /te mando o pix|mandar o pix|te passar o pix|passar o pagamento/i,
+    /começar com 1 foto|comecar com 1 foto/i,
+    /confirmar essa restaura/i,
+  ].some((pattern) => pattern.test(response.trim()));
+}
+
+function isGoodbyeOrHardNo(context: SafetyContext) {
+  const incoming = normalize(context.incomingText).toLowerCase();
+  return /(tchau|obrigad[ao]|valeu|não quero|nao quero|não tenho interesse|nao tenho interesse|pare|cancela|cancelar)/i.test(
+    incoming,
+  );
+}
+
 export function detectConversationStage(context: SafetyContext = {}) {
   const text = compactText(context);
   const hasPhoto =
@@ -77,6 +97,122 @@ export function detectConversationStage(context: SafetyContext = {}) {
   if (askedTrust) return "trust_requested";
   if (hasPhoto) return "photo_received";
   return "needs_photo";
+}
+
+export function detectObjectionType(context: SafetyContext = {}) {
+  const text = compactText(context);
+
+  if (/pr[eé]via|amostra|teste gr[aá]tis|ver antes|antes de pagar|depois eu pago|faz antes/.test(text)) {
+    return "preview";
+  }
+  if (/e se .*ruim|se ficar ruim|n[aã]o gostar|ficar ruim|resultado ruim/.test(text)) {
+    return "result_fear";
+  }
+  if (/n[aã]o confio|confi[aá]vel|confian[cç]a|golpe|garantia|seguro|medo|receio/.test(text)) {
+    return "trust";
+  }
+  if (/t[aá] caro|caro|desconto|barato|menor valor/.test(text)) {
+    return "price_resistance";
+  }
+  if (/vou pensar|depois eu vejo|mais tarde|amanh[aã]|qualquer coisa|te chamo/.test(text)) {
+    return "delay";
+  }
+  if (/pre[cç]o|valor|quanto|custa|pacote|r\$/.test(text)) {
+    return "price";
+  }
+
+  return "none";
+}
+
+export function detectEmotionalContext(context: SafetyContext = {}) {
+  const text = compactText(context);
+
+  if (/av[oó]|avó|avô|v[oó]/.test(text)) return "grandparent";
+  if (/\bm[aã]e\b|\bpai\b|fam[ií]lia|familiar/.test(text)) return "family";
+  if (/falecid[ao]|morreu|partiu|saudade/.test(text)) return "loss";
+  if (/mem[oó]ria|lembran[cç]a|foto antiga|antiga/.test(text)) return "memory";
+
+  return "none";
+}
+
+function hasPhotoInContext(context: SafetyContext = {}) {
+  return (
+    Boolean(context.hasPhoto) ||
+    /cliente enviou uma foto|foto para restaurar|imagem|photo|image/.test(compactText(context))
+  );
+}
+
+function hasPriceInContext(context: SafetyContext = {}) {
+  return /9,99|r\$\s*9|valor|pre[cç]o|fica/i.test(compactText(context));
+}
+
+export function buildCommercialInstruction(context: SafetyContext = {}) {
+  const objectionType = detectObjectionType(context);
+  const emotionalContext = detectEmotionalContext(context);
+
+  return {
+    objectionType,
+    emotionalContext,
+    hasPhoto: hasPhotoInContext(context),
+    hasPrice: hasPriceInContext(context),
+    mustCloseSale: !isGoodbyeOrHardNo(context),
+  };
+}
+
+function ctaForContext(context: SafetyContext = {}) {
+  const instruction = buildCommercialInstruction(context);
+
+  if (!instruction.hasPhoto) {
+    return "Me manda a foto aqui que eu vejo pra você.";
+  }
+  if (instruction.objectionType === "preview") {
+    return "Quer começar com 1 foto por R$ 9,99?";
+  }
+  if (instruction.objectionType === "price") {
+    return "Quer que eu te mande o PIX?";
+  }
+  if (
+    instruction.objectionType === "trust" ||
+    instruction.objectionType === "result_fear" ||
+    instruction.objectionType === "price_resistance"
+  ) {
+    return "Pode começar com 1 foto só. Quer que eu te mande o PIX?";
+  }
+  if (instruction.objectionType === "delay") {
+    return "Se quiser começar com 1 foto, fica R$ 9,99. Posso te mandar o PIX?";
+  }
+  if (instruction.emotionalContext !== "none") {
+    return "Quer que eu já comece essa foto pra você?";
+  }
+  if (instruction.hasPhoto && !instruction.hasPrice) {
+    return "A de 1 foto fica R$ 9,99. Quer que eu te mande o PIX?";
+  }
+
+  return "Quer que eu te mande o PIX?";
+}
+
+export function ensureSalesCTA(response: string, context: SafetyContext = {}) {
+  const output = normalize(response);
+
+  if (!output || isGoodbyeOrHardNo(context) || hasCommercialCTA(output)) {
+    return output;
+  }
+
+  return `${output}\n\n${ctaForContext(context)}`;
+}
+
+export function splitResponseIntoWhatsAppMessages(response: string) {
+  const parts = response
+    .split(/\n{2,}/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+
+  if (parts.length <= 1) return [response.trim()].filter(Boolean);
+
+  const first = parts[0];
+  const second = parts.slice(1).join("\n\n");
+
+  return [first, second].filter(Boolean).slice(0, 2);
 }
 
 export function safeFallbackForStage(stage: string) {

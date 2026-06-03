@@ -316,20 +316,38 @@ async function startSocket(options = {}) {
         });
         if (presenceInterval) clearInterval(presenceInterval);
 
-        const replyText = String(webhookResponse?.reply?.text || "").trim();
-        const replyPhone = normalizePhone(webhookResponse?.reply?.phone || phone);
-        const typingDelayMs = Number(webhookResponse?.reply?.typingDelayMs || 0);
+        const replies = Array.isArray(webhookResponse?.replies)
+          ? webhookResponse.replies
+          : webhookResponse?.reply
+            ? [webhookResponse.reply]
+            : [];
 
-        if (replyText && replyPhone && socketState === "open") {
+        if (replies.length && socketState === "open") {
+          const firstReply = replies[0] || {};
+          const firstReplyPhone = normalizePhone(firstReply?.phone || phone);
+          const firstTypingDelayMs = Number(firstReply?.typingDelayMs || 0);
           const elapsedMs = Date.now() - typingStartedAt;
-          const remainingDelayMs = Math.max(0, typingDelayMs - elapsedMs);
+          const remainingDelayMs = Math.max(0, firstTypingDelayMs - elapsedMs);
           if (remainingDelayMs > 0) {
-            await sendTypingPresence(replyPhone, remainingDelayMs).catch((error) => {
+            await sendTypingPresence(firstReplyPhone, remainingDelayMs).catch((error) => {
               console.error("[baileys-bridge] final typing presence error:", error);
             });
             await sleep(remainingDelayMs);
           }
-          await sock.sendMessage(toJid(replyPhone), { text: replyText });
+
+          for (let index = 0; index < replies.length; index += 1) {
+            const reply = replies[index] || {};
+            const replyText = String(reply?.text || "").trim();
+            const replyPhone = normalizePhone(reply?.phone || phone);
+
+            if (!replyText || !replyPhone) continue;
+
+            if (index > 0) {
+              await sleep(900);
+            }
+
+            await sock.sendMessage(toJid(replyPhone), { text: replyText });
+          }
         }
       }
     });

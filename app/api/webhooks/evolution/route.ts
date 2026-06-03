@@ -14,8 +14,10 @@ import { leadService } from "@/services/lead.service";
 import { openRouterService } from "@/services/openrouter.service";
 import { promptService } from "@/services/prompt.service";
 import {
+  ensureSalesCTA,
   safeFallbackForStage,
   sanitizeAIResponse,
+  splitResponseIntoWhatsAppMessages,
   validatePromptMaster,
 } from "@/services/ai-safety.service";
 import {
@@ -369,7 +371,13 @@ export async function POST(request: Request) {
       recentHistory,
       hasPhoto: incoming.type === "IMAGE",
     });
-    const typingDelayMs = calculateTypingDelay(safeResponse.output);
+    const commercialResponse = ensureSalesCTA(safeResponse.output, {
+      incomingText: incoming.text,
+      recentHistory,
+      hasPhoto: incoming.type === "IMAGE",
+    });
+    const responseMessages = splitResponseIntoWhatsAppMessages(commercialResponse);
+    const typingDelayMs = calculateTypingDelay(commercialResponse);
     const elapsedSinceTypingStartedMs = Date.now() - typingStartedAt;
     const waitBeforeSendMs = remainingTypingDelay({
       calculatedDelayMs: typingDelayMs,
@@ -394,32 +402,54 @@ export async function POST(request: Request) {
       });
     }
 
-    await conversationService.saveMessage({
-      conversationId: conversation.id,
-      leadId: lead.id,
-      direction: "OUTBOUND",
-      role: "ASSISTANT",
-      type: "TEXT",
-      content: safeResponse.output,
-      metadata: {
-        model: aiResponse.model,
-        usage: aiResponse.usage,
-        fallback: Boolean(aiResponse.fallback || safeResponse.blocked),
-        sanitized: safeResponse.blocked,
-        sanitizeReason: safeResponse.reason ?? null,
-        promptValidationMissing: promptValidation.missing,
-        replyTransport: incoming.replyTransport,
-        typingDelayMs,
-        waitBeforeSendMs,
-        elapsedSinceTypingStartedMs,
-      } as Prisma.InputJsonValue,
-    });
+    if (commercialResponse !== safeResponse.output) {
+      await prisma.log.create({
+        data: {
+          type: "AI_SALES_CTA_ENFORCED",
+          message: "CTA comercial adicionado antes do envio",
+          payload: {
+            leadId: lead.id,
+            conversationId: conversation.id,
+            originalResponse: safeResponse.output,
+            finalResponse: commercialResponse,
+            messagesCount: responseMessages.length,
+          },
+        },
+      });
+    }
+
+    for (let index = 0; index < responseMessages.length; index += 1) {
+      await conversationService.saveMessage({
+        conversationId: conversation.id,
+        leadId: lead.id,
+        direction: "OUTBOUND",
+        role: "ASSISTANT",
+        type: "TEXT",
+        content: responseMessages[index],
+        metadata: {
+          model: aiResponse.model,
+          usage: aiResponse.usage,
+          fallback: Boolean(aiResponse.fallback || safeResponse.blocked),
+          sanitized: safeResponse.blocked,
+          sanitizeReason: safeResponse.reason ?? null,
+          promptValidationMissing: promptValidation.missing,
+          replyTransport: incoming.replyTransport,
+          typingDelayMs,
+          waitBeforeSendMs,
+          elapsedSinceTypingStartedMs,
+          commercialCtaEnforced: commercialResponse !== safeResponse.output,
+          messagePart: index + 1,
+          totalParts: responseMessages.length,
+        } as Prisma.InputJsonValue,
+      });
+    }
 
     if (incoming.replyTransport === "baileys_bridge") {
       return NextResponse.json({
         ok: true,
-        response: safeResponse.output,
-        reply: { phone: lead.phone, text: safeResponse.output, typingDelayMs },
+        response: commercialResponse,
+        replies: responseMessages.map((text) => ({ phone: lead.phone, text, typingDelayMs })),
+        reply: { phone: lead.phone, text: commercialResponse, typingDelayMs },
       });
     }
 
@@ -428,9 +458,15 @@ export async function POST(request: Request) {
       await sleep(waitBeforeSendMs);
     }
 
-    const sent = await evolutionService.sendTextStrict(lead.phone, safeResponse.output);
+    const sent = [];
+    for (let index = 0; index < responseMessages.length; index += 1) {
+      if (index > 0) {
+        await sleep(900);
+      }
+      sent.push(await evolutionService.sendTextStrict(lead.phone, responseMessages[index]));
+    }
 
-    return NextResponse.json({ ok: true, response: safeResponse.output, sent });
+    return NextResponse.json({ ok: true, response: commercialResponse, sent });
 
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erro desconhecido no webhook";
