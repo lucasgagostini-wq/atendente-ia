@@ -6,6 +6,10 @@ export const dynamic = "force-dynamic";
 
 const DEFAULT_OPENROUTER_MODEL =
   process.env.OPENROUTER_DEFAULT_MODEL || "openai/gpt-oss-20b:free";
+const DEFAULT_FALLBACK_MODEL =
+  process.env.FALLBACK_AI_MODEL ||
+  process.env.OPENROUTER_FALLBACK_MODEL ||
+  "openai/gpt-oss-20b:free";
 
 function normalize(value?: string | null) {
   return value && value.trim() ? value.trim() : null;
@@ -49,6 +53,45 @@ export async function GET(request: Request) {
   const evolutionConfigured = Boolean(
     evolutionApiUrl && evolutionApiKey && evolutionInstanceName,
   );
+  const since24h = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  const [
+    lastSuccess,
+    lastError,
+    errors24h,
+    fallback24h,
+    blocked24h,
+    rateLimit24h,
+  ] = await Promise.all([
+    prisma.log.findFirst({
+      where: { type: "AI_RESPONSE" },
+      orderBy: { createdAt: "desc" },
+      select: { createdAt: true, message: true, payload: true },
+    }),
+    prisma.log.findFirst({
+      where: { type: "AI_ERROR" },
+      orderBy: { createdAt: "desc" },
+      select: { createdAt: true, message: true, payload: true },
+    }),
+    prisma.log.count({
+      where: { type: "AI_ERROR", createdAt: { gte: since24h } },
+    }),
+    prisma.log.count({
+      where: { type: "AI_FALLBACK_USED", createdAt: { gte: since24h } },
+    }),
+    prisma.log.count({
+      where: { type: "AI_RESPONSE_BLOCKED", createdAt: { gte: since24h } },
+    }),
+    prisma.log.count({
+      where: {
+        type: "AI_ERROR",
+        createdAt: { gte: since24h },
+        payload: { path: ["status"], equals: 429 },
+      },
+    }),
+  ]);
+  const primaryModel = settings.openRouterModel || DEFAULT_OPENROUTER_MODEL;
+  const fallbackModel = DEFAULT_FALLBACK_MODEL;
+  const usingFreeModel = /:free\b/i.test(primaryModel) || /:free\b/i.test(fallbackModel);
 
   const checks = {
     evolutionConfigured,
@@ -83,7 +126,23 @@ export async function GET(request: Request) {
     },
     ai: {
       configured: Boolean(openRouterApiKey),
-      model: settings.openRouterModel || DEFAULT_OPENROUTER_MODEL,
+      model: primaryModel,
+      primaryModel,
+      fallbackModel,
+      timeoutMs: Number(process.env.AI_TIMEOUT_MS || 20_000),
+      maxRetries: Number(process.env.AI_MAX_RETRIES || 1),
+      usingFreeModel,
+      lastSuccess,
+      lastError,
+      errors24h,
+      fallback24h,
+      blocked24h,
+      rateLimit24h,
+      alerts: {
+        freeModel: usingFreeModel,
+        rateLimit: rateLimit24h > 0,
+        recentErrors: errors24h > 0,
+      },
     },
     prospector: {
       configured: Boolean(apifyApiToken),

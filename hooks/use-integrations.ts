@@ -21,6 +21,22 @@ type IntegrationStatus = {
   ai: {
     configured: boolean;
     model: string;
+    primaryModel: string;
+    fallbackModel: string;
+    timeoutMs: number;
+    maxRetries: number;
+    usingFreeModel: boolean;
+    lastSuccess: { createdAt: string; message: string; payload: unknown } | null;
+    lastError: { createdAt: string; message: string; payload: unknown } | null;
+    errors24h: number;
+    fallback24h: number;
+    blocked24h: number;
+    rateLimit24h: number;
+    alerts: {
+      freeModel: boolean;
+      rateLimit: boolean;
+      recentErrors: boolean;
+    };
   };
   prospector: {
     configured: boolean;
@@ -37,4 +53,3 @@ export function useIntegrationsStatus() {
     refetchInterval: 8000,
   });
 }
-

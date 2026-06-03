@@ -3,6 +3,8 @@ import { aiRespondSchema } from "@/lib/validations";
 import { conversationService } from "@/services/conversation.service";
 import { openRouterService } from "@/services/openrouter.service";
 import { promptService } from "@/services/prompt.service";
+import { sanitizeAIResponse, validatePromptMaster } from "@/services/ai-safety.service";
+import { prisma } from "@/lib/prisma";
 
 export const dynamic = "force-dynamic";
 
@@ -39,6 +41,21 @@ export async function POST(request: Request) {
       lead: conversation.lead,
       recentHistory,
     });
+    const promptValidation = validatePromptMaster(prompt);
+
+    if (!promptValidation.valid) {
+      await prisma.log.create({
+        data: {
+          type: "AI_PROMPT_WARNING",
+          message: "Prompt Master incompleto antes de resposta manual com IA",
+          payload: {
+            leadId: conversation.lead.id,
+            conversationId: conversation.id,
+            missing: promptValidation.missing,
+          },
+        },
+      });
+    }
 
     const generated = await openRouterService.generateResponse({
       messages: [
@@ -48,7 +65,33 @@ export async function POST(request: Request) {
           : []),
       ],
       maxTokens: 350,
+      safetyContext: {
+        incomingText: parsed.data.incomingMessage,
+        recentHistory,
+      },
     });
+    const safeResponse = sanitizeAIResponse(generated.output, {
+      incomingText: parsed.data.incomingMessage,
+      recentHistory,
+    });
+
+    if (safeResponse.blocked) {
+      await prisma.log.create({
+        data: {
+          type: "AI_RESPONSE_BLOCKED",
+          message: "Resposta bloqueada antes de salvar sugestão de IA",
+          payload: {
+            leadId: conversation.lead.id,
+            conversationId: conversation.id,
+            model: generated.model,
+            rawResponse: generated.output,
+            finalResponse: safeResponse.output,
+            reason: safeResponse.reason,
+            fallbackStage: safeResponse.fallbackStage,
+          },
+        },
+      });
+    }
 
     await conversationService.saveMessage({
       conversationId: conversation.id,
@@ -56,15 +99,23 @@ export async function POST(request: Request) {
       direction: "OUTBOUND",
       role: "ASSISTANT",
       type: "TEXT",
-      content: generated.output,
+      content: safeResponse.output,
       metadata: {
         model: generated.model,
         usage: generated.usage,
-        fallback: generated.fallback ?? false,
+        fallback: Boolean(generated.fallback || safeResponse.blocked),
+        sanitized: safeResponse.blocked,
+        sanitizeReason: safeResponse.reason ?? null,
+        promptValidationMissing: promptValidation.missing,
       },
     });
 
-    return NextResponse.json(generated);
+    return NextResponse.json({
+      ...generated,
+      output: safeResponse.output,
+      fallback: Boolean(generated.fallback || safeResponse.blocked),
+      sanitized: safeResponse.blocked,
+    });
   } catch (error) {
     return NextResponse.json(
       {

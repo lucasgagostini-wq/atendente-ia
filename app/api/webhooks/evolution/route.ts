@@ -13,6 +13,7 @@ import { evolutionService } from "@/services/evolution.service";
 import { leadService } from "@/services/lead.service";
 import { openRouterService } from "@/services/openrouter.service";
 import { promptService } from "@/services/prompt.service";
+import { sanitizeAIResponse, validatePromptMaster } from "@/services/ai-safety.service";
 
 export const dynamic = "force-dynamic";
 
@@ -223,6 +224,21 @@ export async function POST(request: Request) {
     ]);
 
     const systemPrompt = promptService.composeSystemPrompt({ prompt, lead, recentHistory });
+    const promptValidation = validatePromptMaster(prompt);
+
+    if (!promptValidation.valid) {
+      await prisma.log.create({
+        data: {
+          type: "AI_PROMPT_WARNING",
+          message: "Prompt Master incompleto antes da chamada da IA",
+          payload: {
+            leadId: lead.id,
+            conversationId: conversation.id,
+            missing: promptValidation.missing,
+          },
+        },
+      });
+    }
 
     const aiResponse = await openRouterService.generateResponse({
       messages: [
@@ -230,7 +246,35 @@ export async function POST(request: Request) {
         { role: "user", content: incoming.text },
       ],
       maxTokens: 220,
+      safetyContext: {
+        incomingText: incoming.text,
+        recentHistory,
+        hasPhoto: incoming.type === "IMAGE",
+      },
     });
+    const safeResponse = sanitizeAIResponse(aiResponse.output, {
+      incomingText: incoming.text,
+      recentHistory,
+      hasPhoto: incoming.type === "IMAGE",
+    });
+
+    if (safeResponse.blocked) {
+      await prisma.log.create({
+        data: {
+          type: "AI_RESPONSE_BLOCKED",
+          message: "Resposta bloqueada antes do envio ao WhatsApp",
+          payload: {
+            leadId: lead.id,
+            conversationId: conversation.id,
+            model: aiResponse.model,
+            rawResponse: aiResponse.output,
+            finalResponse: safeResponse.output,
+            reason: safeResponse.reason,
+            fallbackStage: safeResponse.fallbackStage,
+          },
+        },
+      });
+    }
 
     await conversationService.saveMessage({
       conversationId: conversation.id,
@@ -238,11 +282,14 @@ export async function POST(request: Request) {
       direction: "OUTBOUND",
       role: "ASSISTANT",
       type: "TEXT",
-      content: aiResponse.output,
+      content: safeResponse.output,
       metadata: {
         model: aiResponse.model,
         usage: aiResponse.usage,
-        fallback: aiResponse.fallback ?? false,
+        fallback: Boolean(aiResponse.fallback || safeResponse.blocked),
+        sanitized: safeResponse.blocked,
+        sanitizeReason: safeResponse.reason ?? null,
+        promptValidationMissing: promptValidation.missing,
         replyTransport: incoming.replyTransport,
       } as Prisma.InputJsonValue,
     });
@@ -250,14 +297,14 @@ export async function POST(request: Request) {
     if (incoming.replyTransport === "baileys_bridge") {
       return NextResponse.json({
         ok: true,
-        response: aiResponse.output,
-        reply: { phone: lead.phone, text: aiResponse.output },
+        response: safeResponse.output,
+        reply: { phone: lead.phone, text: safeResponse.output },
       });
     }
 
-    const sent = await evolutionService.sendTextStrict(lead.phone, aiResponse.output);
+    const sent = await evolutionService.sendTextStrict(lead.phone, safeResponse.output);
 
-    return NextResponse.json({ ok: true, response: aiResponse.output, sent });
+    return NextResponse.json({ ok: true, response: safeResponse.output, sent });
 
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erro desconhecido no webhook";

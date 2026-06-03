@@ -1,6 +1,7 @@
 import axios from "axios";
 import { getSettings } from "@/lib/settings-cache";
 import { prisma } from "@/lib/prisma";
+import { safeFallbackForStage, sanitizeAIResponse } from "@/services/ai-safety.service";
 
 type ChatMessage = {
   role: "system" | "user" | "assistant";
@@ -12,6 +13,11 @@ type GenerateArgs = {
   model?: string;
   temperature?: number;
   maxTokens?: number;
+  safetyContext?: {
+    incomingText?: string | null;
+    recentHistory?: string[];
+    hasPhoto?: boolean;
+  };
 };
 
 const FREE_FALLBACK_MODEL = "openai/gpt-oss-20b:free";
@@ -21,11 +27,28 @@ const FREE_FALLBACK_MODELS = [
   "nvidia/nemotron-3-nano-30b-a3b:free",
 ];
 
+function numberFromEnv(name: string, fallback: number) {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function extractErrorDetail(error: unknown) {
+  const status = axios.isAxiosError(error) ? error.response?.status ?? null : null;
+  const detail = axios.isAxiosError(error)
+    ? error.response?.data?.error?.message || error.response?.data
+    : null;
+  const message = error instanceof Error ? error.message : "Erro desconhecido no OpenRouter";
+
+  return { status, detail, message };
+}
+
 class OpenRouterService {
-
-
   private mockResponse() {
-    return "Perfeito, entendi. Me diz só uma coisa: hoje seu foco é vender mais ou melhorar o suporte primeiro?";
+    return safeFallbackForStage("needs_photo");
   }
 
   private async requestCompletion(args: {
@@ -34,6 +57,7 @@ class OpenRouterService {
     messages: ChatMessage[];
     temperature: number;
     maxTokens?: number;
+    timeoutMs: number;
   }) {
     const { data } = await axios.post(
       "https://openrouter.ai/api/v1/chat/completions",
@@ -44,7 +68,7 @@ class OpenRouterService {
         messages: args.messages,
       },
       {
-        timeout: 20_000,
+        timeout: args.timeoutMs,
         headers: {
           Authorization: `Bearer ${args.apiKey}`,
           "Content-Type": "application/json",
@@ -69,78 +93,173 @@ class OpenRouterService {
   async generateResponse(args: GenerateArgs) {
     const settings = await getSettings();
     const apiKey = settings.openRouterApiKey || process.env.OPENROUTER_API_KEY;
+    const fallbackModel =
+      process.env.FALLBACK_AI_MODEL ||
+      process.env.OPENROUTER_FALLBACK_MODEL ||
+      FREE_FALLBACK_MODEL;
     const model =
       args.model ||
+      process.env.PRIMARY_AI_MODEL ||
       settings.openRouterModel ||
       process.env.OPENROUTER_DEFAULT_MODEL ||
       FREE_FALLBACK_MODEL;
     const temperature = args.temperature ?? settings.temperature ?? 0.6;
+    const timeoutMs = numberFromEnv("AI_TIMEOUT_MS", 20_000);
+    const maxRetries = numberFromEnv("AI_MAX_RETRIES", 1);
+    const startedAt = Date.now();
 
     if (!apiKey) {
       return {
-        output: this.mockResponse(),
+        output: sanitizeAIResponse(this.mockResponse(), args.safetyContext).output,
         model: "mock/local",
         usage: null,
+        fallback: true,
       };
     }
 
-    const modelsToTry = Array.from(new Set([model, ...FREE_FALLBACK_MODELS]));
+    const modelsToTry = Array.from(new Set([model, fallbackModel, ...FREE_FALLBACK_MODELS]));
+
+    await prisma.log.create({
+      data: {
+        type: "AI_REQUEST",
+        message: `Solicitação de IA iniciada com modelo principal ${model}`,
+        payload: {
+          primaryModel: model,
+          fallbackModel,
+          modelsToTry,
+          maxRetries,
+          timeoutMs,
+          messageCount: args.messages.length,
+          maxTokens: args.maxTokens ?? 400,
+        },
+      },
+    });
 
     for (const candidateModel of modelsToTry) {
-      try {
-        const generated = await this.requestCompletion({
-          apiKey,
-          model: candidateModel,
-          messages: args.messages,
-          temperature,
-          maxTokens: args.maxTokens,
-        });
+      for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
+        const attemptStartedAt = Date.now();
 
-        await prisma.log.create({
-          data: {
-            type: "OPENROUTER_RESPONSE",
-            message: `Modelo ${candidateModel} respondeu com sucesso`,
-            payload: {
-              usage: generated.usage,
-              finishReason: generated.finishReason,
-              recoveredFromModel: candidateModel === model ? null : model,
+        try {
+          const generated = await this.requestCompletion({
+            apiKey,
+            model: candidateModel,
+            messages: args.messages,
+            temperature,
+            maxTokens: args.maxTokens,
+            timeoutMs,
+          });
+
+          const sanitized = sanitizeAIResponse(generated.output, args.safetyContext);
+
+          await prisma.log.create({
+            data: {
+              type: sanitized.blocked ? "AI_RESPONSE_BLOCKED" : "AI_RESPONSE",
+              message: sanitized.blocked
+                ? `Resposta do modelo ${candidateModel} bloqueada pela camada de segurança`
+                : `Modelo ${candidateModel} respondeu com sucesso`,
+              payload: {
+                model: candidateModel,
+                primaryModel: model,
+                attempt,
+                durationMs: Date.now() - attemptStartedAt,
+                totalDurationMs: Date.now() - startedAt,
+                usage: generated.usage,
+                finishReason: generated.finishReason,
+                rawResponse: generated.output,
+                finalResponse: sanitized.output,
+                blocked: sanitized.blocked,
+                blockReason: sanitized.reason ?? null,
+                fallbackStage: sanitized.fallbackStage,
+                recoveredFromModel: candidateModel === model ? null : model,
+              },
             },
-          },
-        });
+          });
 
-        return {
-          output: generated.output,
-          model: candidateModel,
-          usage: generated.usage,
-        };
-      } catch (error) {
-        const status =
-          axios.isAxiosError(error) ? error.response?.status ?? null : null;
-        const detail =
-          axios.isAxiosError(error)
-            ? error.response?.data?.error?.message || error.response?.data
-            : null;
-        const message =
-          error instanceof Error ? error.message : "Erro desconhecido no OpenRouter";
-
-        await prisma.log.create({
-          data: {
-            type: "OPENROUTER_ERROR",
-            message,
-            payload: {
+          if (sanitized.blocked) {
+            return {
+              output: sanitized.output,
               model: candidateModel,
-              primaryModel: model,
-              status,
-              detail,
+              usage: generated.usage,
+              fallback: true,
+              blocked: true,
+            };
+          }
+
+          if (candidateModel !== model) {
+            await prisma.log.create({
+              data: {
+                type: "AI_FALLBACK_USED",
+                message: `Fallback de modelo usado: ${candidateModel}`,
+                payload: {
+                  primaryModel: model,
+                  fallbackModel: candidateModel,
+                  attempt,
+                },
+              },
+            });
+          }
+
+          return {
+            output: sanitized.output,
+            model: candidateModel,
+            usage: generated.usage,
+            fallback: candidateModel !== model,
+          };
+        } catch (error) {
+          const { status, detail, message } = extractErrorDetail(error);
+
+          await prisma.log.create({
+            data: {
+              type: "AI_ERROR",
+              message,
+              payload: {
+                model: candidateModel,
+                primaryModel: model,
+                attempt,
+                status,
+                detail,
+                durationMs: Date.now() - attemptStartedAt,
+              },
             },
-          },
-        });
+          });
+
+          if (attempt < maxRetries) {
+            await prisma.log.create({
+              data: {
+                type: "AI_RETRY",
+                message: `Tentando novamente o modelo ${candidateModel}`,
+                payload: {
+                  model: candidateModel,
+                  nextAttempt: attempt + 1,
+                  status,
+                },
+              },
+            });
+            await sleep(700);
+          }
+        }
       }
     }
 
+    const fallback = sanitizeAIResponse(null, args.safetyContext);
+
+    await prisma.log.create({
+      data: {
+        type: "AI_FALLBACK_USED",
+        message: "Todos os modelos falharam; fallback humano seguro aplicado",
+        payload: {
+          primaryModel: model,
+          fallbackModel,
+          modelsToTry,
+          finalResponse: fallback.output,
+          fallbackStage: fallback.fallbackStage,
+          totalDurationMs: Date.now() - startedAt,
+        },
+      },
+    });
+
     return {
-      output:
-        "Tive uma instabilidade rápida aqui. Quer que eu te mande um resumo objetivo da oferta e valores?",
+      output: fallback.output,
       model,
       usage: null,
       fallback: true,

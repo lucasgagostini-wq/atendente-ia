@@ -214,6 +214,7 @@ export default function ConfiguracoesPage() {
   }
 
   const checks = integrationsStatus.data?.checks;
+  const aiHealth = integrationsStatus.data?.ai;
   const missing = integrationsStatus.data?.missing ?? [];
   const healthy = useMemo(() => {
     if (!checks) return false;
@@ -274,6 +275,57 @@ export default function ConfiguracoesPage() {
                 <CheckCircle size={16} weight="duotone" />
                 Tudo pronto para receber e responder mensagens automáticas.
               </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Saúde da IA</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex flex-wrap gap-2">
+            <Badge variant={aiHealth?.configured ? "success" : "warning"}>
+              OpenRouter: {aiHealth?.configured ? "configurado" : "sem chave"}
+            </Badge>
+            <Badge variant={aiHealth?.alerts?.freeModel ? "warning" : "success"}>
+              Modelo: {aiHealth?.primaryModel || "não definido"}
+            </Badge>
+            <Badge variant={aiHealth?.alerts?.rateLimit ? "warning" : "default"}>
+              Rate limit 24h: {aiHealth?.rateLimit24h ?? 0}
+            </Badge>
+            <Badge variant={(aiHealth?.blocked24h ?? 0) > 0 ? "warning" : "success"}>
+              Bloqueios 24h: {aiHealth?.blocked24h ?? 0}
+            </Badge>
+            <Badge variant={(aiHealth?.fallback24h ?? 0) > 0 ? "warning" : "success"}>
+              Fallbacks 24h: {aiHealth?.fallback24h ?? 0}
+            </Badge>
+          </div>
+          <div className="grid gap-2 text-sm text-zinc-400 md:grid-cols-2">
+            <p>Fallback: {aiHealth?.fallbackModel || "não definido"}</p>
+            <p>Retry/timeout: {aiHealth?.maxRetries ?? 1} retry, {aiHealth?.timeoutMs ?? 20000}ms</p>
+            <p>
+              Último sucesso:{" "}
+              {aiHealth?.lastSuccess?.createdAt
+                ? new Date(aiHealth.lastSuccess.createdAt).toLocaleString("pt-BR")
+                : "sem registro"}
+            </p>
+            <p>
+              Último erro:{" "}
+              {aiHealth?.lastError?.createdAt
+                ? new Date(aiHealth.lastError.createdAt).toLocaleString("pt-BR")
+                : "sem registro"}
+            </p>
+          </div>
+          {aiHealth?.alerts?.freeModel && (
+            <div className="rounded-md border border-yellow-500/30 bg-yellow-500/10 p-3 text-sm text-yellow-100">
+              Modelo gratuito em uso. Funciona para teste, mas pode sofrer limite ou instabilidade em operação real.
+            </div>
+          )}
+          {aiHealth?.alerts?.rateLimit && (
+            <div className="rounded-md border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-100">
+              Rate limit detectado nas últimas 24h. A camada de segurança mantém respostas humanas, mas vale trocar o modelo se isso repetir.
             </div>
           )}
         </CardContent>
