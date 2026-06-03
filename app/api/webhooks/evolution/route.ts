@@ -69,18 +69,22 @@ function extractIncomingPayload(payload: any): IncomingPayload | null {
   // Ignorar mensagens de grupos
   if (remoteJid.endsWith("@g.us")) return null;
 
-  const text =
+  let text =
     messageNode?.conversation ||
     messageNode?.extendedTextMessage?.text ||
     messageNode?.imageMessage?.caption ||
     messageNode?.audioMessage?.caption ||
     "";
 
-  if (!text || typeof text !== "string" || text.trim().length === 0) return null;
-
   let type: IncomingPayload["type"] = "TEXT";
   if (messageNode?.imageMessage) type = "IMAGE";
   if (messageNode?.audioMessage) type = "AUDIO";
+
+  if ((!text || typeof text !== "string" || text.trim().length === 0) && type === "IMAGE") {
+    text = "Cliente enviou uma foto para restaurar.";
+  }
+
+  if (!text || typeof text !== "string" || text.trim().length === 0) return null;
 
   const phone = normalizePhone(payloadPhone || remoteJid);
   if (!phone) return null;

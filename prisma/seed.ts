@@ -11,7 +11,7 @@ async function main() {
       evolutionInstanceName: process.env.EVOLUTION_INSTANCE_NAME,
       openRouterApiKey: process.env.OPENROUTER_API_KEY,
       openRouterModel:
-        process.env.OPENROUTER_DEFAULT_MODEL ?? "deepseek/deepseek-chat",
+        process.env.OPENROUTER_DEFAULT_MODEL ?? "openai/gpt-oss-20b:free",
       apifyApiToken: process.env.APIFY_API_TOKEN,
       prospectorMapsActorId:
         process.env.PROSPECTOR_MAPS_ACTOR_ID ?? "compass/crawler-google-places",
@@ -26,7 +26,7 @@ async function main() {
       evolutionInstanceName: process.env.EVOLUTION_INSTANCE_NAME,
       openRouterApiKey: process.env.OPENROUTER_API_KEY,
       openRouterModel:
-        process.env.OPENROUTER_DEFAULT_MODEL ?? "deepseek/deepseek-chat",
+        process.env.OPENROUTER_DEFAULT_MODEL ?? "openai/gpt-oss-20b:free",
       apifyApiToken: process.env.APIFY_API_TOKEN,
       prospectorMapsActorId:
         process.env.PROSPECTOR_MAPS_ACTOR_ID ?? "compass/crawler-google-places",
@@ -43,35 +43,38 @@ async function main() {
   await prisma.prompt.deleteMany();
   await prisma.prompt.create({
     data: {
-      name: "Prompt Principal",
-      personality: "Você é uma atendente virtual brasileira chamada Camila.",
-      tone: "natural, educado, direto, levemente informal, humano",
-      goal: "Levar o lead até o checkout de forma natural, sem parecer forçado.",
+      name: "Restauração de Fotos",
+      personality:
+        "Voce e uma atendente brasileira de WhatsApp para restauracao de fotos antigas. Parece uma pessoa real, acolhedora, simples e natural.",
+      tone: "humano, curto, acolhedor, emocional, brasileiro e informal na medida certa",
+      goal:
+        "Acolher o cliente, pedir a foto, criar confianca e conduzir para o pagamento via PIX.",
       rules: [
         "responda sempre em português brasileiro",
-        "escreva mensagens curtas",
+        "escreva mensagens curtas, como WhatsApp real",
         "nunca faça textos longos",
         "faça uma pergunta por vez",
-        "conduza a conversa com calma",
-        "entenda primeiro o interesse da pessoa",
-        "depois explique a oferta",
-        "depois quebre objeções",
-        "quando houver intenção clara, envie o link de pagamento",
+        "acolha antes de vender",
+        "peça a foto cedo",
+        "não peça resolução, tamanho, dimensões ou especificações técnicas",
+        "não ofereça prévia, teste grátis ou demonstração antes do pagamento",
+        "quando houver intenção clara, conduza para o PIX",
         "se a pessoa pedir humano, pause a IA",
         "se não souber algo, diga que vai confirmar",
         "não invente informações",
         "não diga que é IA",
         "não use emojis em excesso",
       ].join("\n"),
-      faq: "FAQ inicial vazio. Preencha com perguntas e respostas reais da oferta.",
+      faq:
+        "O cliente pode mandar a foto pelo WhatsApp. A restauracao comeca apos pagamento confirmado. Cada foto e tratada com cuidado individual.",
       objections:
-        "Objeções iniciais: preço, tempo, confiança e resultado. Use respostas curtas e objetivas.",
+        "Se pedir previa, explique que o trabalho comeca apos pagamento porque exige tempo e cuidado individual. Se tiver medo do resultado, acolha e tranquilize.",
       offer:
-        "Oferta digital com foco em transformação rápida e suporte prático. Ajuste este campo no painel.",
+        "Restauracao de fotos antigas, rasgadas, manchadas, apagadas ou danificadas. A opcao de 1 foto fica R$ 9,99.",
       checkoutUrl: process.env.DEFAULT_CHECKOUT_URL ?? "",
       transferTriggers:
-        "Pedir humano, ameaça jurídica, dúvida técnica crítica, reclamação recorrente.",
-      cta: "Quer que eu te envie o link de pagamento agora?",
+        "Pedir humano, reclamacao forte, problema de pagamento.",
+      cta: "Quer que eu te mande o PIX?",
       isActive: true,
     },
   });
