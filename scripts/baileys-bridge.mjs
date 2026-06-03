@@ -36,6 +36,8 @@ let starting = null;
 let manualStop = false;
 let pairingReadyAt = 0;
 let pairingReadyWaiters = [];
+const typingSessions = new Map();
+const TYPING_BUFFER_MS = Number(process.env.TYPING_BUFFER_MS || 1000);
 
 const app = express();
 app.use((_, res, next) => {
@@ -107,21 +109,44 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function sendTypingPresence(number, delayMs = 3000) {
+function clearTypingSession(number, options = {}) {
+  const digits = normalizePhone(number);
+  const session = typingSessions.get(digits);
+  if (!session) return;
+
+  clearTimeout(session.timeout);
+  typingSessions.delete(digits);
+
+  if (options.pause && socket && socketState === "open" && session.jid) {
+    socket.sendPresenceUpdate("paused", session.jid).catch(() => {});
+  }
+}
+
+async function startTypingPresence(number, durationMs = 3000) {
   if (!socket || socketState !== "open") return false;
 
+  const digits = normalizePhone(number);
   const jid = toJid(number);
   if (!jid) return false;
 
+  clearTypingSession(digits);
+
+  const delayMs = Math.max(0, Math.round(durationMs + TYPING_BUFFER_MS));
   await socket.sendPresenceUpdate("composing", jid);
 
-  if (delayMs > 0) {
-    setTimeout(() => {
-      socket?.sendPresenceUpdate?.("paused", jid).catch(() => {});
-    }, delayMs).unref?.();
-  }
+  const timeout = setTimeout(() => {
+    typingSessions.delete(digits);
+    socket?.sendPresenceUpdate?.("paused", jid).catch(() => {});
+  }, delayMs);
+  timeout.unref?.();
+
+  typingSessions.set(digits, { timeout, jid, delayMs, startedAt: Date.now() });
 
   return true;
+}
+
+async function sendTypingPresence(number, delayMs = 3000) {
+  return startTypingPresence(number, delayMs);
 }
 
 function markPairingReady() {
@@ -297,21 +322,6 @@ async function startSocket(options = {}) {
 
         const phone = resolvePhoneFromJid(message.key.remoteJid);
         const typingStartedAt = Date.now();
-        const presenceNumber = phone || resolvePhoneFromJid(message.key.remoteJid);
-        let presenceInterval = null;
-
-        if (presenceNumber) {
-          sendTypingPresence(presenceNumber, 3000).catch((error) => {
-            console.error("[baileys-bridge] typing presence error:", error);
-          });
-
-          presenceInterval = setInterval(() => {
-            sendTypingPresence(presenceNumber, 3000).catch((error) => {
-              console.error("[baileys-bridge] typing presence renew error:", error);
-            });
-          }, 4000);
-          presenceInterval.unref?.();
-        }
 
         const webhookResponse = await emitWebhook({
           event: "MESSAGES_UPSERT",
@@ -328,7 +338,6 @@ async function startSocket(options = {}) {
             pushName: message.pushName || null,
           },
         });
-        if (presenceInterval) clearInterval(presenceInterval);
 
         const replies = Array.isArray(webhookResponse?.replies)
           ? webhookResponse.replies
@@ -341,9 +350,9 @@ async function startSocket(options = {}) {
           const firstReplyPhone = normalizePhone(firstReply?.phone || phone);
           const firstTypingDelayMs = Number(firstReply?.typingDelayMs || 0);
           const elapsedMs = Date.now() - typingStartedAt;
-          const remainingDelayMs = Math.max(0, firstTypingDelayMs - elapsedMs);
-          if (remainingDelayMs > 0) {
-            await sendTypingPresence(firstReplyPhone, remainingDelayMs).catch((error) => {
+          const remainingDelayMs = Math.max(1500, firstTypingDelayMs - elapsedMs);
+          if (remainingDelayMs > 0 && firstReplyPhone) {
+            await startTypingPresence(firstReplyPhone, remainingDelayMs).catch((error) => {
               console.error("[baileys-bridge] final typing presence error:", error);
             });
             await sleep(remainingDelayMs);
@@ -357,10 +366,15 @@ async function startSocket(options = {}) {
             if (!replyText || !replyPhone) continue;
 
             if (index > 0) {
-              await sleep(900);
+              const betweenMessagesTypingMs = index === 1 ? 1400 : 1200;
+              await startTypingPresence(replyPhone, betweenMessagesTypingMs).catch((error) => {
+                console.error("[baileys-bridge] between-message typing error:", error);
+              });
+              await sleep(betweenMessagesTypingMs);
             }
 
             await sock.sendMessage(toJid(replyPhone), { text: replyText });
+            clearTypingSession(replyPhone, { pause: true });
           }
         }
       }
@@ -628,7 +642,7 @@ app.post("/chat/sendPresence/:instance", async (req, res) => {
   }
 
   try {
-    await sendTypingPresence(number, Number.isFinite(delay) ? delay : 3000);
+    await startTypingPresence(number, Number.isFinite(delay) ? delay : 3000);
     res.json({ presence: "composing", number, delay });
   } catch (error) {
     res.status(500).json({

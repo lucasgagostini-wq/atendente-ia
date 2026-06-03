@@ -1,6 +1,7 @@
 import axios, { AxiosInstance } from "axios";
 import { getSettings } from "@/lib/settings-cache";
 import { prisma } from "@/lib/prisma";
+import { TYPING_BUFFER_MS } from "@/lib/typing-delay";
 
 type SendMediaPayload = {
   phone: string;
@@ -11,6 +12,8 @@ type SendMediaPayload = {
 type SendOptions = {
   allowSimulation?: boolean;
 };
+
+const typingSessions = new Map<string, ReturnType<typeof setTimeout>>();
 
 function isLocalUrl(value: string) {
   return /localhost|127\.0\.0\.1|0\.0\.0\.0/i.test(value);
@@ -137,9 +140,23 @@ class EvolutionService {
     return;
   }
 
-  async sendTypingPresence(number: string, delayMs: number): Promise<void> {
+  async startTypingPresence(number: string, durationMs: number): Promise<void> {
     const { client, instance, isConfigured } = await this.getClient(5_000);
     const normalizedNumber = number.replace(/\D/g, "");
+    const delayMs = Math.max(0, Math.round(durationMs + TYPING_BUFFER_MS));
+    const existingSession = typingSessions.get(normalizedNumber);
+
+    if (existingSession) {
+      clearTimeout(existingSession);
+      typingSessions.delete(normalizedNumber);
+      prisma.log.create({
+        data: {
+          type: "TYPING_CANCELLED",
+          message: `Sessão antiga de typing cancelada para ${normalizedNumber}`,
+          payload: { number: normalizedNumber, reason: "new_session" },
+        },
+      }).catch(() => {});
+    }
 
     if (!normalizedNumber || !isConfigured || !client) {
       return;
@@ -148,21 +165,36 @@ class EvolutionService {
     try {
       await client.post(`/chat/sendPresence/${instance}`, {
         number: normalizedNumber,
+        delay: delayMs,
+        presence: "composing",
         options: {
           delay: delayMs,
           number: normalizedNumber,
         },
       });
 
+      const timeout = setTimeout(() => {
+        typingSessions.delete(normalizedNumber);
+      }, delayMs);
+      typingSessions.set(normalizedNumber, timeout);
+
       await prisma.log.create({
         data: {
-          type: "WHATSAPP_TYPING_PRESENCE",
-          message: `Typing presence enviado para ${normalizedNumber}`,
+          type: "TYPING_STARTED",
+          message: `Typing iniciado para ${normalizedNumber}`,
           payload: {
             number: normalizedNumber,
+            durationMs,
             delayMs,
             instance,
           },
+        },
+      });
+      await prisma.log.create({
+        data: {
+          type: "TYPING_SENT",
+          message: `Presence composing enviado para ${normalizedNumber}`,
+          payload: { number: normalizedNumber, durationMs, delayMs, instance },
         },
       });
     } catch (error) {
@@ -183,6 +215,27 @@ class EvolutionService {
         },
       }).catch(() => {});
     }
+  }
+
+  async sendTypingPresence(number: string, delayMs: number): Promise<void> {
+    return this.startTypingPresence(number, delayMs);
+  }
+
+  async clearTypingSession(number: string): Promise<void> {
+    const normalizedNumber = number.replace(/\D/g, "");
+    const existingSession = typingSessions.get(normalizedNumber);
+    if (!existingSession) return;
+
+    clearTimeout(existingSession);
+    typingSessions.delete(normalizedNumber);
+
+    await prisma.log.create({
+      data: {
+        type: "TYPING_CANCELLED",
+        message: `Typing limpo após envio para ${normalizedNumber}`,
+        payload: { number: normalizedNumber, reason: "message_sent" },
+      },
+    }).catch(() => {});
   }
 
   async sendText(phone: string, text: string) {

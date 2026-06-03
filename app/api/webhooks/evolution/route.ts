@@ -152,6 +152,21 @@ async function saveAndSendMessages(args: {
     calculatedDelayMs: typingDelayMs,
     elapsedMs: Date.now() - args.typingStartedAt,
   });
+  const aiElapsedMs = Date.now() - args.typingStartedAt;
+
+  prisma.log.create({
+    data: {
+      type: "TYPING_DURATION_CALCULATED",
+      message: `Typing calculado para ${args.phone}`,
+      payload: {
+        number: args.phone,
+        typingDelayMs,
+        aiElapsedMs,
+        waitBeforeSendMs,
+        messagesCount: args.messages.length,
+      },
+    },
+  }).catch(() => {});
 
   for (let index = 0; index < args.messages.length; index += 1) {
     await conversationService.saveMessage({
@@ -181,14 +196,31 @@ async function saveAndSendMessages(args: {
   }
 
   if (waitBeforeSendMs > 0) {
-    await evolutionService.sendTypingPresence(args.phone, waitBeforeSendMs);
+    await evolutionService.startTypingPresence(args.phone, waitBeforeSendMs);
     await sleep(waitBeforeSendMs);
   }
 
   const sent = [];
   for (let index = 0; index < args.messages.length; index += 1) {
-    if (index > 0) await sleep(900);
+    if (index > 0) {
+      const betweenMessagesTypingMs = index === 1 ? 1400 : 1200;
+      await evolutionService.startTypingPresence(args.phone, betweenMessagesTypingMs);
+      await sleep(betweenMessagesTypingMs);
+    }
     sent.push(await evolutionService.sendTextStrict(args.phone, args.messages[index]));
+    await evolutionService.clearTypingSession(args.phone);
+    prisma.log.create({
+      data: {
+        type: "MESSAGE_SENT_AFTER_TYPING",
+        message: `Mensagem enviada após typing para ${args.phone}`,
+        payload: {
+          number: args.phone,
+          messagePart: index + 1,
+          totalParts: args.messages.length,
+          waitBeforeSendMs: index === 0 ? waitBeforeSendMs : undefined,
+        },
+      },
+    }).catch(() => {});
   }
 
   return { ok: true, response: fullText, sent };
@@ -276,10 +308,6 @@ export async function POST(request: Request) {
     });
     const typingStartedAt = Date.now();
 
-    if (incoming.replyTransport !== "baileys_bridge") {
-      evolutionService.sendTypingPresence(lead.phone, 3000).catch(() => {});
-    }
-
     // ── Log assíncrono (não bloqueia o fluxo) ───────────────
     prisma.log.create({
       data: {
@@ -319,13 +347,14 @@ export async function POST(request: Request) {
       }
 
       if (waitBeforeSendMs > 0) {
-        await evolutionService.sendTypingPresence(lead.phone, waitBeforeSendMs);
+        await evolutionService.startTypingPresence(lead.phone, waitBeforeSendMs);
         await sleep(waitBeforeSendMs);
       }
 
       const sent = await evolutionService.sendTextStrict(lead.phone, transferText).catch((e) => ({
         error: e instanceof Error ? e.message : "falha no envio",
       }));
+      await evolutionService.clearTypingSession(lead.phone);
 
       return NextResponse.json({ ok: true, transferred: true, sent });
     }
@@ -485,14 +514,6 @@ export async function POST(request: Request) {
       });
     }
 
-    let renewPresenceTimer: ReturnType<typeof setInterval> | null = null;
-
-    if (incoming.replyTransport !== "baileys_bridge") {
-      renewPresenceTimer = setInterval(() => {
-        evolutionService.sendTypingPresence(lead.phone, 3000).catch(() => {});
-      }, 4000);
-    }
-
     const aiResponse = await withTimeout(openRouterService.generateResponse({
       messages: [
         { role: "system", content: systemPrompt },
@@ -505,8 +526,6 @@ export async function POST(request: Request) {
         hasPhoto: incoming.type === "IMAGE",
       },
     }), AI_RESPONSE_TIMEOUT_MS);
-
-    if (renewPresenceTimer) clearInterval(renewPresenceTimer);
 
     if (aiResponse.model === "safe-fallback/timeout") {
       await prisma.log.create({
@@ -611,16 +630,31 @@ export async function POST(request: Request) {
     }
 
     if (waitBeforeSendMs > 0) {
-      await evolutionService.sendTypingPresence(lead.phone, waitBeforeSendMs);
+      await evolutionService.startTypingPresence(lead.phone, waitBeforeSendMs);
       await sleep(waitBeforeSendMs);
     }
 
     const sent = [];
     for (let index = 0; index < responseMessages.length; index += 1) {
       if (index > 0) {
-        await sleep(900);
+        const betweenMessagesTypingMs = index === 1 ? 1400 : 1200;
+        await evolutionService.startTypingPresence(lead.phone, betweenMessagesTypingMs);
+        await sleep(betweenMessagesTypingMs);
       }
       sent.push(await evolutionService.sendTextStrict(lead.phone, responseMessages[index]));
+      await evolutionService.clearTypingSession(lead.phone);
+      prisma.log.create({
+        data: {
+          type: "MESSAGE_SENT_AFTER_TYPING",
+          message: `Mensagem enviada após typing para ${lead.phone}`,
+          payload: {
+            number: lead.phone,
+            messagePart: index + 1,
+            totalParts: responseMessages.length,
+            waitBeforeSendMs: index === 0 ? waitBeforeSendMs : undefined,
+          },
+        },
+      }).catch(() => {});
     }
 
     return NextResponse.json({ ok: true, response: commercialResponse, sent });
