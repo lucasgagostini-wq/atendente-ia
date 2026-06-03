@@ -23,6 +23,7 @@ type IncomingPayload = {
   text: string;
   messageId: string | null;
   type: "TEXT" | "IMAGE" | "AUDIO";
+  replyTransport?: "baileys_bridge" | "evolution";
   senderName?: string;
   metadata?: Prisma.InputJsonValue;
 };
@@ -89,6 +90,10 @@ function extractIncomingPayload(payload: any): IncomingPayload | null {
     text: text.trim(),
     messageId: keyNode?.id ?? null,
     type,
+    replyTransport:
+      payload?.data?.replyTransport === "baileys_bridge"
+        ? "baileys_bridge"
+        : "evolution",
     senderName: payload?.data?.pushName || payload?.pushName || undefined,
     metadata: {
       event: payload?.event || payload?.data?.event || null,
@@ -177,20 +182,27 @@ export async function POST(request: Request) {
 
       const transferText = "Perfeito. Vou pausar a IA e encaminhar você para nosso atendimento humano agora.";
 
-      const [, sent] = await Promise.all([
-        conversationService.saveMessage({
-          conversationId: conversation.id,
-          leadId: lead.id,
-          direction: "OUTBOUND",
-          role: "SYSTEM",
-          type: "TEXT",
-          content: transferText,
-          metadata: {} as Prisma.InputJsonValue,
-        }),
-        evolutionService.sendTextStrict(lead.phone, transferText).catch((e) => ({
-          error: e instanceof Error ? e.message : "falha no envio",
-        })),
-      ]);
+      await conversationService.saveMessage({
+        conversationId: conversation.id,
+        leadId: lead.id,
+        direction: "OUTBOUND",
+        role: "SYSTEM",
+        type: "TEXT",
+        content: transferText,
+        metadata: {} as Prisma.InputJsonValue,
+      });
+
+      if (incoming.replyTransport === "baileys_bridge") {
+        return NextResponse.json({
+          ok: true,
+          transferred: true,
+          reply: { phone: lead.phone, text: transferText },
+        });
+      }
+
+      const sent = await evolutionService.sendTextStrict(lead.phone, transferText).catch((e) => ({
+        error: e instanceof Error ? e.message : "falha no envio",
+      }));
 
       return NextResponse.json({ ok: true, transferred: true, sent });
     }
@@ -216,23 +228,30 @@ export async function POST(request: Request) {
       maxTokens: 350,
     });
 
-    // Salvar resposta e enviar ao WhatsApp em paralelo
-    const [, sent] = await Promise.all([
-      conversationService.saveMessage({
-        conversationId: conversation.id,
-        leadId: lead.id,
-        direction: "OUTBOUND",
-        role: "ASSISTANT",
-        type: "TEXT",
-        content: aiResponse.output,
-        metadata: {
-          model: aiResponse.model,
-          usage: aiResponse.usage,
-          fallback: aiResponse.fallback ?? false,
-        } as Prisma.InputJsonValue,
-      }),
-      evolutionService.sendTextStrict(lead.phone, aiResponse.output),
-    ]);
+    await conversationService.saveMessage({
+      conversationId: conversation.id,
+      leadId: lead.id,
+      direction: "OUTBOUND",
+      role: "ASSISTANT",
+      type: "TEXT",
+      content: aiResponse.output,
+      metadata: {
+        model: aiResponse.model,
+        usage: aiResponse.usage,
+        fallback: aiResponse.fallback ?? false,
+        replyTransport: incoming.replyTransport,
+      } as Prisma.InputJsonValue,
+    });
+
+    if (incoming.replyTransport === "baileys_bridge") {
+      return NextResponse.json({
+        ok: true,
+        response: aiResponse.output,
+        reply: { phone: lead.phone, text: aiResponse.output },
+      });
+    }
+
+    const sent = await evolutionService.sendTextStrict(lead.phone, aiResponse.output);
 
     return NextResponse.json({ ok: true, response: aiResponse.output, sent });
 

@@ -159,7 +159,7 @@ function resetAuthFiles() {
 }
 
 async function emitWebhook(payload) {
-  if (!webhookUrl) return;
+  if (!webhookUrl) return null;
 
   try {
     const response = await fetch(webhookUrl, {
@@ -173,8 +173,11 @@ async function emitWebhook(payload) {
         `[baileys-bridge] webhook returned ${response.status} ${response.statusText}`,
       );
     }
+
+    return await response.json().catch(() => null);
   } catch (error) {
     console.error("[baileys-bridge] webhook error:", error);
+    return null;
   }
 }
 
@@ -259,10 +262,11 @@ async function startSocket(options = {}) {
 
         const phone = resolvePhoneFromJid(message.key.remoteJid);
 
-        await emitWebhook({
+        const webhookResponse = await emitWebhook({
           event: "MESSAGES_UPSERT",
           data: {
             phone,
+            replyTransport: "baileys_bridge",
             key: {
               remoteJid: message.key.remoteJid,
               id: message.key.id || null,
@@ -273,6 +277,13 @@ async function startSocket(options = {}) {
             pushName: message.pushName || null,
           },
         });
+
+        const replyText = String(webhookResponse?.reply?.text || "").trim();
+        const replyPhone = normalizePhone(webhookResponse?.reply?.phone || phone);
+
+        if (replyText && replyPhone && socketState === "open") {
+          await sock.sendMessage(toJid(replyPhone), { text: replyText });
+        }
       }
     });
 
