@@ -119,7 +119,9 @@ class OpenRouterService {
 
     const modelsToTry = Array.from(new Set([model, fallbackModel, ...FREE_FALLBACK_MODELS]));
 
-    await prisma.log.create({
+    // Log de início é fire-and-forget: NÃO bloquear o caminho crítico da resposta.
+    // A chamada à IA logo abaixo mantém o event loop vivo até este log persistir.
+    prisma.log.create({
       data: {
         type: "AI_REQUEST",
         message: `Solicitação de IA iniciada com modelo principal ${model}`,
@@ -133,7 +135,7 @@ class OpenRouterService {
           maxTokens: args.maxTokens ?? 400,
         },
       },
-    });
+    }).catch(() => {});
 
     for (const candidateModel of modelsToTry) {
       for (let attempt = 0; attempt <= maxRetries; attempt += 1) {
@@ -208,7 +210,10 @@ class OpenRouterService {
         } catch (error) {
           const { status, detail, message } = extractErrorDetail(error);
 
-          await prisma.log.create({
+          // Logs de erro/retry são fire-and-forget: há sempre trabalho assíncrono
+          // depois (retry com sleep, próximo modelo, ou fallback final) que mantém
+          // o event loop vivo até o log persistir. Evita somar latência ao caminho crítico.
+          prisma.log.create({
             data: {
               type: "AI_ERROR",
               message,
@@ -221,10 +226,10 @@ class OpenRouterService {
                 durationMs: Date.now() - attemptStartedAt,
               },
             },
-          });
+          }).catch(() => {});
 
           if (attempt < maxRetries) {
-            await prisma.log.create({
+            prisma.log.create({
               data: {
                 type: "AI_RETRY",
                 message: `Tentando novamente o modelo ${candidateModel}`,
@@ -234,7 +239,7 @@ class OpenRouterService {
                   status,
                 },
               },
-            });
+            }).catch(() => {});
             await sleep(700);
           }
         }

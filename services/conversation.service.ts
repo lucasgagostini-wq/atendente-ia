@@ -113,6 +113,7 @@ class ConversationService {
     role: MessageRole;
     type: MessageType;
     content: string;
+    whatsappMessageId?: string | null;
     metadata?: Prisma.InputJsonValue;
   }) {
     const message = await prisma.message.create({

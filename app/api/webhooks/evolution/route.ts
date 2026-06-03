@@ -420,15 +420,18 @@ export async function POST(request: Request) {
     }
 
     // ── Deduplicação ─────────────────────────────────────────
-    // Evita processar a mesma mensagem duas vezes (retries do webhook)
+    // Evita processar a mesma mensagem duas vezes (retries do webhook).
+    // Busca primeiro pela coluna indexada `whatsappMessageId` (O(1)); como
+    // fallback, checa o path JSON em metadata para mensagens antigas gravadas
+    // antes da coluna existir.
     if (incoming.messageId) {
       const alreadyProcessed = await prisma.message.findFirst({
         where: {
-          metadata: {
-            path: ["key", "id"],
-            equals: incoming.messageId,
-          },
           direction: "INBOUND",
+          OR: [
+            { whatsappMessageId: incoming.messageId },
+            { metadata: { path: ["key", "id"], equals: incoming.messageId } },
+          ],
         },
         select: { id: true },
       });
@@ -455,6 +458,7 @@ export async function POST(request: Request) {
       role: "LEAD",
       type: incoming.type,
       content: incoming.text,
+      whatsappMessageId: incoming.messageId,
       metadata: incoming.metadata,
     });
     const typingStartedAt = Date.now();

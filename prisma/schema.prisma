@@ -97,19 +97,23 @@ model Conversation {
 }
 
 model Message {
-  id             String           @id @default(cuid())
-  conversationId String
-  leadId         String
-  direction      MessageDirection
-  role           MessageRole
-  type           MessageType      @default(TEXT)
-  content        String
-  metadata       Json?
-  createdAt      DateTime         @default(now())
-  conversation   Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  lead           Lead             @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  id                String           @id @default(cuid())
+  conversationId    String
+  leadId            String
+  direction         MessageDirection
+  role              MessageRole
+  type              MessageType      @default(TEXT)
+  content           String
+  // ID da mensagem original no WhatsApp. Usado para deduplicação O(1) via índice,
+  // evitando varredura JSON na tabela inteira a cada mensagem recebida.
+  whatsappMessageId String?
+  metadata          Json?
+  createdAt         DateTime         @default(now())
+  conversation      Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  lead              Lead             @relation(fields: [leadId], references: [id], onDelete: Cascade)
 
   @@index([leadId, createdAt])
+  @@index([whatsappMessageId])
 }
 
 model Prompt {
