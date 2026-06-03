@@ -215,7 +215,7 @@ export async function POST(request: Request) {
     // ── Resposta da IA ───────────────────────────────────────
     const [prompt, recentHistory] = await Promise.all([
       promptService.getActivePrompt(),
-      conversationService.getRecentHistory(conversation.id, 16),
+      conversationService.getRecentHistory(conversation.id, 6),
     ]);
 
     const systemPrompt = promptService.composeSystemPrompt({ prompt, lead, recentHistory });
@@ -225,7 +225,7 @@ export async function POST(request: Request) {
         { role: "system", content: systemPrompt },
         { role: "user", content: incoming.text },
       ],
-      maxTokens: 350,
+      maxTokens: 220,
     });
 
     await conversationService.saveMessage({

@@ -15,6 +15,11 @@ type GenerateArgs = {
 };
 
 const FREE_FALLBACK_MODEL = "openai/gpt-oss-20b:free";
+const FREE_FALLBACK_MODELS = [
+  FREE_FALLBACK_MODEL,
+  "z-ai/glm-4.5-air:free",
+  "nvidia/nemotron-3-nano-30b-a3b:free",
+];
 
 class OpenRouterService {
 
@@ -79,7 +84,7 @@ class OpenRouterService {
       };
     }
 
-    const modelsToTry = Array.from(new Set([model, FREE_FALLBACK_MODEL]));
+    const modelsToTry = Array.from(new Set([model, ...FREE_FALLBACK_MODELS]));
 
     for (const candidateModel of modelsToTry) {
       try {
@@ -109,6 +114,12 @@ class OpenRouterService {
           usage: generated.usage,
         };
       } catch (error) {
+        const status =
+          axios.isAxiosError(error) ? error.response?.status ?? null : null;
+        const detail =
+          axios.isAxiosError(error)
+            ? error.response?.data?.error?.message || error.response?.data
+            : null;
         const message =
           error instanceof Error ? error.message : "Erro desconhecido no OpenRouter";
 
@@ -119,6 +130,8 @@ class OpenRouterService {
             payload: {
               model: candidateModel,
               primaryModel: model,
+              status,
+              detail,
             },
           },
         });
