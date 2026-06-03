@@ -8,6 +8,7 @@ import { Boom } from "@hapi/boom";
 import makeWASocket, {
   Browsers,
   DisconnectReason,
+  downloadMediaMessage,
   fetchLatestBaileysVersion,
   useMultiFileAuthState,
 } from "@whiskeysockets/baileys";
@@ -241,6 +242,38 @@ async function emitWebhook(payload) {
   }
 }
 
+async function extractIncomingMedia(message) {
+  const imageMessage = message?.message?.imageMessage;
+  const documentMessage = message?.message?.documentMessage;
+  const mediaNode = imageMessage || documentMessage;
+
+  if (!mediaNode) return null;
+
+  try {
+    const buffer = await downloadMediaMessage(
+      message,
+      "buffer",
+      {},
+      { logger: undefined, reuploadRequest: socket?.updateMediaMessage },
+    );
+    const mimetype = mediaNode.mimetype || (imageMessage ? "image/jpeg" : "application/octet-stream");
+    const base64 = Buffer.from(buffer).toString("base64");
+
+    return {
+      mimetype,
+      fileName: documentMessage?.fileName || null,
+      mediaBase64: `data:${mimetype};base64,${base64}`,
+    };
+  } catch (error) {
+    console.error("[baileys-bridge] failed to download incoming media:", error);
+    return {
+      mimetype: mediaNode.mimetype || null,
+      fileName: documentMessage?.fileName || null,
+      mediaDownloadError: error instanceof Error ? error.message : "download failed",
+    };
+  }
+}
+
 async function startSocket(options = {}) {
   const { forceRestart = false, qr = true } =
     typeof options === "boolean" ? { forceRestart: options, qr: true } : options;
@@ -322,6 +355,7 @@ async function startSocket(options = {}) {
 
         const phone = resolvePhoneFromJid(message.key.remoteJid);
         const typingStartedAt = Date.now();
+        const media = await extractIncomingMedia(message);
 
         const webhookResponse = await emitWebhook({
           event: "MESSAGES_UPSERT",
@@ -334,6 +368,7 @@ async function startSocket(options = {}) {
               fromMe: false,
             },
             message: message.message,
+            media,
             messageTimestamp: message.messageTimestamp || null,
             pushName: message.pushName || null,
           },

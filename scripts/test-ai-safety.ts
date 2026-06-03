@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
 import {
+  PAYMENT_STAGE_RECEIPT_NEEDS_REVIEW,
   PAYMENT_STAGE_RECEIPT_SENT,
   PAYMENT_STAGE_WAITING_RECEIPT,
   PIX_BANK,
   PIX_KEY,
   PIX_NAME,
+  buildExpectedPaymentData,
   detectEmotionalContext,
+  detectIfWaitingPaymentReceipt,
   detectObjectionType,
   detectPaymentIntent,
   detectPaymentReceipt,
@@ -179,12 +182,35 @@ assert.match(
   updateConversationStage("lead quente", PAYMENT_STAGE_WAITING_RECEIPT),
   /\[PAGAMENTO: WAITING_PAYMENT_RECEIPT\]/,
 );
+assert.equal(
+  detectIfWaitingPaymentReceipt(`[PAGAMENTO: ${PAYMENT_STAGE_WAITING_RECEIPT}]`),
+  true,
+);
 assert.match(
   updateConversationStage(
     `[PAGAMENTO: ${PAYMENT_STAGE_WAITING_RECEIPT}]`,
     PAYMENT_STAGE_RECEIPT_SENT,
   ),
   /\[PAGAMENTO: PAYMENT_RECEIPT_SENT\]/,
+);
+assert.match(
+  updateConversationStage(
+    `[PAGAMENTO: ${PAYMENT_STAGE_WAITING_RECEIPT}]`,
+    PAYMENT_STAGE_RECEIPT_NEEDS_REVIEW,
+  ),
+  /\[PAGAMENTO: RECEIPT_NEEDS_REVIEW\]/,
+);
+assert.deepEqual(
+  buildExpectedPaymentData({
+    incomingText: "vou pagar",
+    recentHistory: ["Atendente: A de 1 foto fica R$ 9,99. Quer que eu te mande o PIX?"],
+  }),
+  {
+    pixKey: PIX_KEY,
+    recipientName: PIX_NAME,
+    bank: PIX_BANK,
+    amount: "9.99",
+  },
 );
 
 console.log("AI safety scenarios OK");

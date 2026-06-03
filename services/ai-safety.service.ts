@@ -11,6 +11,7 @@ export const PIX_NAME = "Lucas Agostini";
 export const PIX_BANK = "Nubank";
 export const PAYMENT_STAGE_WAITING_RECEIPT = "WAITING_PAYMENT_RECEIPT";
 export const PAYMENT_STAGE_RECEIPT_SENT = "PAYMENT_RECEIPT_SENT";
+export const PAYMENT_STAGE_RECEIPT_NEEDS_REVIEW = "RECEIPT_NEEDS_REVIEW";
 
 type SanitizedResponse = {
   output: string;
@@ -89,6 +90,22 @@ export function detectPaymentReceipt(context: SafetyContext = {}) {
   );
 }
 
+export function detectIfWaitingPaymentReceipt(summary?: string | null) {
+  return Boolean(summary?.includes(PAYMENT_STAGE_WAITING_RECEIPT));
+}
+
+export function buildExpectedPaymentData(conversationContext?: SafetyContext) {
+  const contextText = compactText(conversationContext ?? {});
+  const amountMatch = contextText.match(/(?:r\$)\s*(\d{1,4}(?:[,.]\d{2})?)/i);
+
+  return {
+    pixKey: PIX_KEY,
+    recipientName: PIX_NAME,
+    bank: PIX_BANK,
+    amount: amountMatch?.[1]?.replace(",", ".") || "9.99",
+  };
+}
+
 export function buildPaymentMessageSequence() {
   return [
     `Claro 😊 pode fazer o PIX por aqui:
@@ -122,11 +139,12 @@ export function sendPixAsSeparateMessage() {
 
 export function updateConversationStage(
   currentSummary: string | null | undefined,
-  stage: typeof PAYMENT_STAGE_WAITING_RECEIPT | typeof PAYMENT_STAGE_RECEIPT_SENT,
+  stage: string,
 ) {
   const summary = normalize(currentSummary)
     .replace(/\n?\[PAGAMENTO: WAITING_PAYMENT_RECEIPT\]/g, "")
-    .replace(/\n?\[PAGAMENTO: PAYMENT_RECEIPT_SENT\]/g, "");
+    .replace(/\n?\[PAGAMENTO: PAYMENT_RECEIPT_SENT\]/g, "")
+    .replace(/\n?\[PAGAMENTO: RECEIPT_NEEDS_REVIEW\]/g, "");
 
   return [summary, `[PAGAMENTO: ${stage}]`].filter(Boolean).join("\n");
 }

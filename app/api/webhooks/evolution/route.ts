@@ -12,12 +12,16 @@ import { conversationService } from "@/services/conversation.service";
 import { evolutionService } from "@/services/evolution.service";
 import { leadService } from "@/services/lead.service";
 import { openRouterService } from "@/services/openrouter.service";
+import { paymentReceiptService, PixReceiptAnalysis } from "@/services/payment-receipt.service";
 import { promptService } from "@/services/prompt.service";
 import {
+  PAYMENT_STAGE_RECEIPT_NEEDS_REVIEW,
   PAYMENT_STAGE_RECEIPT_SENT,
   PAYMENT_STAGE_WAITING_RECEIPT,
+  buildExpectedPaymentData,
   detectPaymentIntent,
   detectPaymentReceipt,
+  detectIfWaitingPaymentReceipt,
   ensureSalesCTA,
   safeFallbackForStage,
   sanitizeAIResponse,
@@ -43,6 +47,7 @@ type IncomingPayload = {
   text: string;
   messageId: string | null;
   type: "TEXT" | "IMAGE" | "AUDIO";
+  imageUrlOrBase64?: string | null;
   replyTransport?: "baileys_bridge" | "evolution";
   senderName?: string;
   metadata?: Prisma.InputJsonValue;
@@ -81,6 +86,18 @@ function extractIncomingPayload(payload: any): IncomingPayload | null {
     payload?.data?.number ||
     payload?.number ||
     "";
+  const mediaNode = payload?.data?.media || payload?.media || null;
+  const imageUrlOrBase64 =
+    mediaNode?.mediaBase64 ||
+    mediaNode?.base64 ||
+    mediaNode?.url ||
+    payload?.data?.mediaBase64 ||
+    payload?.data?.base64 ||
+    payload?.data?.mediaUrl ||
+    payload?.mediaBase64 ||
+    payload?.base64 ||
+    payload?.mediaUrl ||
+    null;
 
   // Ignorar se não tem remetente ou é mensagem própria
   if (!remoteJid) return null;
@@ -118,6 +135,7 @@ function extractIncomingPayload(payload: any): IncomingPayload | null {
     text: text.trim(),
     messageId: keyNode?.id ?? null,
     type,
+    imageUrlOrBase64: typeof imageUrlOrBase64 === "string" ? imageUrlOrBase64 : null,
     replyTransport:
       payload?.data?.replyTransport === "baileys_bridge"
         ? "baileys_bridge"
@@ -128,6 +146,15 @@ function extractIncomingPayload(payload: any): IncomingPayload | null {
       key: keyNode ?? null,
       remoteJid,
       resolvedPhone: phone,
+      media: mediaNode
+        ? {
+            mimetype: mediaNode.mimetype ?? null,
+            fileName: mediaNode.fileName ?? null,
+            hasMediaBase64: Boolean(mediaNode.mediaBase64 || mediaNode.base64),
+            hasMediaUrl: Boolean(mediaNode.url),
+            mediaDownloadError: mediaNode.mediaDownloadError ?? null,
+          }
+        : null,
     } as Prisma.InputJsonValue,
   };
 }
@@ -247,6 +274,130 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T
   } finally {
     if (timeout) clearTimeout(timeout);
   }
+}
+
+type ReceiptPaymentStage =
+  | typeof PAYMENT_STAGE_WAITING_RECEIPT
+  | typeof PAYMENT_STAGE_RECEIPT_SENT
+  | typeof PAYMENT_STAGE_RECEIPT_NEEDS_REVIEW;
+
+function receiptDecisionFromAnalysis(analysis: PixReceiptAnalysis): {
+  stage: ReceiptPaymentStage;
+  message: string;
+  alert: string;
+  kind: string;
+} {
+  if (analysis.isRandomImage || !analysis.looksLikePixReceipt) {
+    return {
+      stage: PAYMENT_STAGE_WAITING_RECEIPT,
+      message:
+        "Recebi a imagem, mas não consegui identificar como comprovante do PIX. Pode me mandar o comprovante do pagamento, por favor?",
+      alert: "Lead enviou imagem que não parece comprovante.",
+      kind: "random_or_unrelated",
+    };
+  }
+
+  const coreMatches =
+    analysis.matchesRecipient &&
+    analysis.matchesPixKey &&
+    analysis.matchesAmount &&
+    (analysis.matchesBank || !analysis.bankFound);
+
+  if (coreMatches && !analysis.suspiciousOrUnclear) {
+    return {
+      stage: PAYMENT_STAGE_RECEIPT_SENT,
+      message:
+        "Recebi sim 😊 vou conferir aqui e já começo a restauração da sua foto com todo carinho.",
+      alert: "Comprovante recebido e parece coerente. Conferir pagamento manualmente.",
+      kind: "coherent",
+    };
+  }
+
+  return {
+    stage: PAYMENT_STAGE_RECEIPT_NEEDS_REVIEW,
+    message: "Recebi aqui 😊 vou conferir certinho os dados do pagamento antes de começar, tá?",
+    alert: "Comprovante enviado, mas há divergência ou informação ilegível. Conferir manualmente.",
+    kind: "needs_review",
+  };
+}
+
+async function createInternalPaymentAlert(args: {
+  leadId: string;
+  conversationId: string;
+  phone: string;
+  message: string;
+  analysis?: PixReceiptAnalysis | null;
+  stage: string;
+  incomingType: string;
+}) {
+  return prisma.log.create({
+    data: {
+      type: "PAYMENT_RECEIPT_ALERT",
+      message: args.message,
+      payload: {
+        leadId: args.leadId,
+        conversationId: args.conversationId,
+        phone: args.phone,
+        paymentStage: args.stage,
+        incomingType: args.incomingType,
+        analysis: args.analysis ?? null,
+      },
+    },
+  });
+}
+
+async function handleReceiptImageMessage(args: {
+  incoming: IncomingPayload;
+  lead: { id: string; phone: string; summary: string | null };
+  conversationId: string;
+  recentHistory: string[];
+  typingStartedAt: number;
+}) {
+  const expectedPaymentData = buildExpectedPaymentData({
+    incomingText: args.incoming.text,
+    recentHistory: args.recentHistory,
+    hasPhoto: args.incoming.type === "IMAGE",
+  });
+  const pixSentAt = args.recentHistory
+    .slice()
+    .reverse()
+    .find((item) => /Chave PIX|estudiofotos000@gmail\.com/i.test(item));
+  const analysis = await paymentReceiptService.analyzePossiblePixReceipt(
+    args.incoming.imageUrlOrBase64,
+    expectedPaymentData,
+    {
+      pixSentAt: pixSentAt || null,
+      receiptReceivedAt: new Date(),
+      recentHistory: args.recentHistory,
+    },
+  );
+  const decision = receiptDecisionFromAnalysis(analysis);
+
+  await prisma.lead.update({
+    where: { id: args.lead.id },
+    data: {
+      funnelStage: "CHECKOUT",
+      status: "NEGOTIATION",
+      summary: updateConversationStage(args.lead.summary, decision.stage),
+    },
+  });
+
+  await createInternalPaymentAlert({
+    leadId: args.lead.id,
+    conversationId: args.conversationId,
+    phone: args.lead.phone,
+    message: decision.alert,
+    analysis,
+    stage: decision.stage,
+    incomingType: args.incoming.type,
+  });
+
+  return {
+    text: decision.message,
+    stage: decision.stage,
+    analysis,
+    decision: decision.kind,
+  };
 }
 
 // ── Handler ────────────────────────────────────────────────────
@@ -401,49 +552,73 @@ export async function POST(request: Request) {
       }
     }
 
-    const isWaitingReceipt =
-      lead.summary?.includes(PAYMENT_STAGE_WAITING_RECEIPT) ?? false;
+    const isWaitingReceipt = detectIfWaitingPaymentReceipt(lead.summary);
 
     if (isWaitingReceipt && detectPaymentReceipt({
       incomingText: incoming.text,
       hasPhoto: incoming.type === "IMAGE",
     })) {
-      const receiptText =
-        "Recebi sim 😊 vou conferir aqui e já começo a restauração da sua foto com todo carinho.";
+      const recentHistory = await conversationService.getRecentHistory(conversation.id, 10);
+      let receiptResult: {
+        text: string;
+        stage: string;
+        analysis?: PixReceiptAnalysis | null;
+        decision: string;
+      };
 
-      await prisma.lead.update({
-        where: { id: lead.id },
-        data: {
-          funnelStage: "CHECKOUT",
-          status: "NEGOTIATION",
-          summary: updateConversationStage(lead.summary, PAYMENT_STAGE_RECEIPT_SENT),
-        },
-      });
-
-      await prisma.log.create({
-        data: {
-          type: "PAYMENT_RECEIPT_ALERT",
-          message: "Comprovante recebido; operador deve conferir o pagamento",
-          payload: {
-            leadId: lead.id,
-            conversationId: conversation.id,
+      if (incoming.type === "IMAGE") {
+        receiptResult = await handleReceiptImageMessage({
+          incoming,
+          lead: {
+            id: lead.id,
             phone: lead.phone,
-            incomingType: incoming.type,
-            text: incoming.text,
+            summary: lead.summary,
           },
-        },
-      });
+          conversationId: conversation.id,
+          recentHistory,
+          typingStartedAt,
+        });
+      } else {
+        receiptResult = {
+          text:
+            "Recebi sim 😊 vou conferir aqui e já começo a restauração da sua foto com todo carinho.",
+          stage: PAYMENT_STAGE_RECEIPT_SENT,
+          analysis: null,
+          decision: "text_receipt_fallback",
+        };
+
+        await prisma.lead.update({
+          where: { id: lead.id },
+          data: {
+            funnelStage: "CHECKOUT",
+            status: "NEGOTIATION",
+            summary: updateConversationStage(lead.summary, PAYMENT_STAGE_RECEIPT_SENT),
+          },
+        });
+
+        await createInternalPaymentAlert({
+          leadId: lead.id,
+          conversationId: conversation.id,
+          phone: lead.phone,
+          message: "Lead informou pagamento por texto. Conferir pagamento manualmente.",
+          analysis: null,
+          stage: PAYMENT_STAGE_RECEIPT_SENT,
+          incomingType: incoming.type,
+        });
+      }
 
       const payload = await saveAndSendMessages({
         conversationId: conversation.id,
         leadId: lead.id,
         phone: lead.phone,
-        messages: [receiptText],
+        messages: [receiptResult.text],
         replyTransport: incoming.replyTransport,
         typingStartedAt,
         metadata: {
           source: "payment_receipt",
-          paymentStage: PAYMENT_STAGE_RECEIPT_SENT,
+          paymentStage: receiptResult.stage,
+          receiptDecision: receiptResult.decision,
+          receiptAnalysis: receiptResult.analysis,
         } as Prisma.InputJsonValue,
       });
 
