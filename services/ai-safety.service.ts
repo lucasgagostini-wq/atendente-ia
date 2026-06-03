@@ -6,6 +6,12 @@ type SafetyContext = {
   hasPhoto?: boolean;
 };
 
+export const PIX_KEY = "estudiofotos000@gmail.com";
+export const PIX_NAME = "Lucas Agostini";
+export const PIX_BANK = "Nubank";
+export const PAYMENT_STAGE_WAITING_RECEIPT = "WAITING_PAYMENT_RECEIPT";
+export const PAYMENT_STAGE_RECEIPT_SENT = "PAYMENT_RECEIPT_SENT";
+
 type SanitizedResponse = {
   output: string;
   blocked: boolean;
@@ -38,6 +44,9 @@ const FORBIDDEN_PATTERNS = [
   /n[aã]o consegui processar/i,
   /dados ausentes/i,
   /modelo indispon[ií]vel/i,
+  /cr[eé]ditos?/i,
+  /\bsaldo\b/i,
+  /placeholder/i,
 ];
 
 const REQUIRED_PROMPT_FIELDS: Array<keyof Prompt> = [
@@ -61,6 +70,65 @@ function compactText(context: SafetyContext) {
     .filter(Boolean)
     .join("\n")
     .toLowerCase();
+}
+
+export function detectPaymentIntent(context: SafetyContext = {}) {
+  const text = normalize(context.incomingText).toLowerCase();
+  return /(manda|passa|envia|mande|pode mandar).{0,20}pix|qual.{0,10}pix|pix\??$|como pago|como faço pra pagar|como faco pra pagar|vou fechar|quero fazer|quero restaurar|pode mandar|fechado|bora|vou pagar|aceito|pode ser|quero sim|manda sim|passa sim/.test(
+    text,
+  );
+}
+
+export function detectPaymentReceipt(context: SafetyContext = {}) {
+  const text = normalize(context.incomingText).toLowerCase();
+  return (
+    Boolean(context.hasPhoto) ||
+    /paguei|fiz o pix|fiz pix|pronto|enviei|segue comprovante|comprovante|t[aá] pago|ta pago|acabei de pagar|pagamento feito/.test(
+      text,
+    )
+  );
+}
+
+export function buildPaymentMessageSequence() {
+  return [
+    `Claro 😊 pode fazer o PIX por aqui:
+
+Chave PIX: ${PIX_KEY}
+Nome: ${PIX_NAME}
+Banco: ${PIX_BANK}
+
+Vou te mandar a chave separada aqui embaixo também, pra ficar mais fácil de copiar.`,
+    PIX_KEY,
+    "Depois que fizer, me manda o comprovante aqui mesmo que eu já inicio a restauração pra você.",
+  ];
+}
+
+export function ensureReceiptRequest(messages: string[]) {
+  const hasReceiptRequest = messages.some((message) =>
+    /comprovante/i.test(message),
+  );
+
+  if (hasReceiptRequest) return messages;
+
+  return [
+    ...messages,
+    "Depois que fizer, me manda o comprovante aqui mesmo que eu já inicio a restauração pra você.",
+  ];
+}
+
+export function sendPixAsSeparateMessage() {
+  return ensureReceiptRequest(buildPaymentMessageSequence());
+}
+
+export function updateConversationStage(
+  currentSummary: string | null | undefined,
+  stage: typeof PAYMENT_STAGE_WAITING_RECEIPT | typeof PAYMENT_STAGE_RECEIPT_SENT,
+) {
+  const summary = normalize(currentSummary)
+    .replace(/\n?\[PAGAMENTO: WAITING_PAYMENT_RECEIPT\]/g, "")
+    .replace(/\n?\[PAGAMENTO: PAYMENT_RECEIPT_SENT\]/g, "");
+
+  return [summary, `[PAGAMENTO: ${stage}]`].filter(Boolean).join("\n");
 }
 
 function hasCommercialCTA(response: string) {

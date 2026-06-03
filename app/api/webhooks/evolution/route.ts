@@ -14,10 +14,16 @@ import { leadService } from "@/services/lead.service";
 import { openRouterService } from "@/services/openrouter.service";
 import { promptService } from "@/services/prompt.service";
 import {
+  PAYMENT_STAGE_RECEIPT_SENT,
+  PAYMENT_STAGE_WAITING_RECEIPT,
+  detectPaymentIntent,
+  detectPaymentReceipt,
   ensureSalesCTA,
   safeFallbackForStage,
   sanitizeAIResponse,
+  sendPixAsSeparateMessage,
   splitResponseIntoWhatsAppMessages,
+  updateConversationStage,
   validatePromptMaster,
 } from "@/services/ai-safety.service";
 import {
@@ -87,15 +93,19 @@ function extractIncomingPayload(payload: any): IncomingPayload | null {
     messageNode?.conversation ||
     messageNode?.extendedTextMessage?.text ||
     messageNode?.imageMessage?.caption ||
+    messageNode?.documentMessage?.caption ||
     messageNode?.audioMessage?.caption ||
     "";
 
   let type: IncomingPayload["type"] = "TEXT";
   if (messageNode?.imageMessage) type = "IMAGE";
+  if (messageNode?.documentMessage) type = "IMAGE";
   if (messageNode?.audioMessage) type = "AUDIO";
 
   if ((!text || typeof text !== "string" || text.trim().length === 0) && type === "IMAGE") {
-    text = "Cliente enviou uma foto para restaurar.";
+    text = messageNode?.documentMessage
+      ? "Cliente enviou um documento ou comprovante."
+      : "Cliente enviou uma foto para restaurar.";
   }
 
   if (!text || typeof text !== "string" || text.trim().length === 0) return null;
@@ -125,6 +135,63 @@ function extractIncomingPayload(payload: any): IncomingPayload | null {
 /** Verifica se a mensagem deve ser transferida para humano */
 function shouldTransferToHuman(message: string): boolean {
   return /(humano|atendente|pessoa real|suporte humano|falar com algu[eé]m|quero falar com)/i.test(message);
+}
+
+async function saveAndSendMessages(args: {
+  conversationId: string;
+  leadId: string;
+  phone: string;
+  messages: string[];
+  replyTransport?: "baileys_bridge" | "evolution";
+  metadata?: Prisma.InputJsonValue;
+  typingStartedAt: number;
+}) {
+  const fullText = args.messages.join("\n\n");
+  const typingDelayMs = calculateTypingDelay(fullText);
+  const waitBeforeSendMs = remainingTypingDelay({
+    calculatedDelayMs: typingDelayMs,
+    elapsedMs: Date.now() - args.typingStartedAt,
+  });
+
+  for (let index = 0; index < args.messages.length; index += 1) {
+    await conversationService.saveMessage({
+      conversationId: args.conversationId,
+      leadId: args.leadId,
+      direction: "OUTBOUND",
+      role: "ASSISTANT",
+      type: "TEXT",
+      content: args.messages[index],
+      metadata: {
+        ...(typeof args.metadata === "object" && args.metadata ? args.metadata : {}),
+        typingDelayMs,
+        waitBeforeSendMs,
+        messagePart: index + 1,
+        totalParts: args.messages.length,
+      } as Prisma.InputJsonValue,
+    });
+  }
+
+  if (args.replyTransport === "baileys_bridge") {
+    return {
+      ok: true,
+      response: fullText,
+      replies: args.messages.map((text) => ({ phone: args.phone, text, typingDelayMs })),
+      reply: { phone: args.phone, text: fullText, typingDelayMs },
+    };
+  }
+
+  if (waitBeforeSendMs > 0) {
+    await evolutionService.sendTypingPresence(args.phone, waitBeforeSendMs);
+    await sleep(waitBeforeSendMs);
+  }
+
+  const sent = [];
+  for (let index = 0; index < args.messages.length; index += 1) {
+    if (index > 0) await sleep(900);
+    sent.push(await evolutionService.sendTextStrict(args.phone, args.messages[index]));
+  }
+
+  return { ok: true, response: fullText, sent };
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
@@ -303,6 +370,96 @@ export async function POST(request: Request) {
           reason: "newer_message_received",
         });
       }
+    }
+
+    const isWaitingReceipt =
+      lead.summary?.includes(PAYMENT_STAGE_WAITING_RECEIPT) ?? false;
+
+    if (isWaitingReceipt && detectPaymentReceipt({
+      incomingText: incoming.text,
+      hasPhoto: incoming.type === "IMAGE",
+    })) {
+      const receiptText =
+        "Recebi sim 😊 vou conferir aqui e já começo a restauração da sua foto com todo carinho.";
+
+      await prisma.lead.update({
+        where: { id: lead.id },
+        data: {
+          funnelStage: "CHECKOUT",
+          status: "NEGOTIATION",
+          summary: updateConversationStage(lead.summary, PAYMENT_STAGE_RECEIPT_SENT),
+        },
+      });
+
+      await prisma.log.create({
+        data: {
+          type: "PAYMENT_RECEIPT_ALERT",
+          message: "Comprovante recebido; operador deve conferir o pagamento",
+          payload: {
+            leadId: lead.id,
+            conversationId: conversation.id,
+            phone: lead.phone,
+            incomingType: incoming.type,
+            text: incoming.text,
+          },
+        },
+      });
+
+      const payload = await saveAndSendMessages({
+        conversationId: conversation.id,
+        leadId: lead.id,
+        phone: lead.phone,
+        messages: [receiptText],
+        replyTransport: incoming.replyTransport,
+        typingStartedAt,
+        metadata: {
+          source: "payment_receipt",
+          paymentStage: PAYMENT_STAGE_RECEIPT_SENT,
+        } as Prisma.InputJsonValue,
+      });
+
+      return NextResponse.json(payload);
+    }
+
+    if (detectPaymentIntent({ incomingText: incoming.text })) {
+      const paymentMessages = sendPixAsSeparateMessage();
+
+      await prisma.lead.update({
+        where: { id: lead.id },
+        data: {
+          funnelStage: "CHECKOUT",
+          status: "NEGOTIATION",
+          summary: updateConversationStage(lead.summary, PAYMENT_STAGE_WAITING_RECEIPT),
+        },
+      });
+
+      await prisma.log.create({
+        data: {
+          type: "PAYMENT_PIX_SENT",
+          message: "Dados PIX enviados em sequência separada",
+          payload: {
+            leadId: lead.id,
+            conversationId: conversation.id,
+            phone: lead.phone,
+            paymentStage: PAYMENT_STAGE_WAITING_RECEIPT,
+          },
+        },
+      });
+
+      const payload = await saveAndSendMessages({
+        conversationId: conversation.id,
+        leadId: lead.id,
+        phone: lead.phone,
+        messages: paymentMessages,
+        replyTransport: incoming.replyTransport,
+        typingStartedAt,
+        metadata: {
+          source: "payment_intent",
+          paymentStage: PAYMENT_STAGE_WAITING_RECEIPT,
+        } as Prisma.InputJsonValue,
+      });
+
+      return NextResponse.json(payload);
     }
 
     // ── Resposta da IA ───────────────────────────────────────

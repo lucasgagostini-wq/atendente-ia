@@ -1,11 +1,20 @@
 import assert from "node:assert/strict";
 import {
+  PAYMENT_STAGE_RECEIPT_SENT,
+  PAYMENT_STAGE_WAITING_RECEIPT,
+  PIX_BANK,
+  PIX_KEY,
+  PIX_NAME,
   detectEmotionalContext,
   detectObjectionType,
+  detectPaymentIntent,
+  detectPaymentReceipt,
   ensureSalesCTA,
   safeFallbackForStage,
   sanitizeAIResponse,
+  sendPixAsSeparateMessage,
   splitResponseIntoWhatsAppMessages,
+  updateConversationStage,
   validatePromptMaster,
 } from "../services/ai-safety.service";
 
@@ -19,6 +28,7 @@ const blockedScenarios = [
   "Erro na API, tente novamente depois.",
   "Não tenho informações suficientes sobre a oferta.",
   "Sou uma IA e preciso que configure o prompt.",
+  "Use seus créditos e saldo para pagar.",
   "",
 ];
 
@@ -141,5 +151,40 @@ const splitMessages = splitResponseIntoWhatsAppMessages(
   "Entendo seu receio 🥺 eu começo depois da confirmação.\n\nA de 1 foto fica R$ 9,99. Quer que eu te mande o PIX?",
 );
 assert.equal(splitMessages.length, 2);
+
+const pixMessages = sendPixAsSeparateMessage();
+assert.equal(pixMessages.length, 3);
+assert.equal(
+  pixMessages[0],
+  `Claro 😊 pode fazer o PIX por aqui:
+
+Chave PIX: ${PIX_KEY}
+Nome: ${PIX_NAME}
+Banco: ${PIX_BANK}
+
+Vou te mandar a chave separada aqui embaixo também, pra ficar mais fácil de copiar.`,
+);
+assert.equal(pixMessages[1], "estudiofotos000@gmail.com");
+assert.equal(
+  pixMessages[2],
+  "Depois que fizer, me manda o comprovante aqui mesmo que eu já inicio a restauração pra você.",
+);
+assert.equal(detectPaymentIntent({ incomingText: "manda o pix" }), true);
+assert.equal(detectPaymentIntent({ incomingText: "como faço pra pagar?" }), true);
+assert.equal(detectPaymentIntent({ incomingText: "fechado, pode mandar" }), true);
+assert.equal(detectPaymentReceipt({ incomingText: "fiz o pix" }), true);
+assert.equal(detectPaymentReceipt({ incomingText: "segue comprovante" }), true);
+assert.equal(detectPaymentReceipt({ incomingText: "", hasPhoto: true }), true);
+assert.match(
+  updateConversationStage("lead quente", PAYMENT_STAGE_WAITING_RECEIPT),
+  /\[PAGAMENTO: WAITING_PAYMENT_RECEIPT\]/,
+);
+assert.match(
+  updateConversationStage(
+    `[PAGAMENTO: ${PAYMENT_STAGE_WAITING_RECEIPT}]`,
+    PAYMENT_STAGE_RECEIPT_SENT,
+  ),
+  /\[PAGAMENTO: PAYMENT_RECEIPT_SENT\]/,
+);
 
 console.log("AI safety scenarios OK");
