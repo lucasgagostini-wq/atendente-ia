@@ -52,6 +52,36 @@ function extractQr(payload: any) {
   );
 }
 
+async function getLocalBridgeStatus(): Promise<EvolutionStatus | null> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 1800);
+
+  try {
+    const response = await fetch("http://127.0.0.1:8080/health", {
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    if (!response.ok) return null;
+
+    const payload = await response.json();
+    if (!payload?.connected) return null;
+
+    return {
+      connected: true,
+      configured: true,
+      number: payload.ownerJid?.replace(/\D/g, "") || null,
+      raw: {
+        statusSource: "local_baileys_bridge",
+        localBridge: payload,
+      },
+    };
+  } catch {
+    return null;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
 export default function ConfiguracoesPage() {
   const settingsQuery = useSettings();
   const integrationsStatus = useIntegrationsStatus();
@@ -76,8 +106,10 @@ export default function ConfiguracoesPage() {
       const response = await fetch("/api/evolution/status");
       const payload = await response.json();
       if (!response.ok) throw new Error(payload.error || "Falha ao buscar status");
-      setEvolutionStatus(payload);
-      if (payload?.connected) {
+      const localStatus = payload?.connected ? null : await getLocalBridgeStatus();
+      const mergedStatus = localStatus || payload;
+      setEvolutionStatus(mergedStatus);
+      if (mergedStatus?.connected) {
         setQrAutoRefresh(false);
         setQrCode(null);
       }

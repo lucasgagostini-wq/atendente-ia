@@ -44,12 +44,73 @@ type IntegrationStatus = {
   webhookUrl: string | null;
 };
 
+async function getLocalBridgeHealth() {
+  if (typeof window === "undefined") return null;
 
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 1800);
+
+  try {
+    const response = await fetch("http://127.0.0.1:8080/health", {
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    if (!response.ok) return null;
+
+    const health = await response.json();
+    if (!health?.connected) return null;
+
+    return health as {
+      connected: boolean;
+      state?: string;
+      ownerJid?: string | null;
+      hasWebhook?: boolean;
+      instanceName?: string;
+      lastError?: unknown;
+    };
+  } catch {
+    return null;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+async function getMergedIntegrationStatus() {
+  const status = await request<IntegrationStatus>("/api/integrations/status");
+  const localBridge = await getLocalBridgeHealth();
+
+  if (!localBridge?.connected) return status;
+
+  const number = localBridge.ownerJid?.replace(/\D/g, "") || status.evolution.number;
+
+  return {
+    ...status,
+    checks: {
+      ...status.checks,
+      evolutionConfigured: true,
+      evolutionConnected: true,
+    },
+    missing: status.missing.filter(
+      (item) => !/WhatsApp|Conexão da instância|QR Code/i.test(item),
+    ),
+    evolution: {
+      ...status.evolution,
+      configured: true,
+      connected: true,
+      number,
+      raw: {
+        server: status.evolution.raw,
+        localBridge,
+        statusSource: "local_baileys_bridge",
+      },
+    },
+  };
+}
 
 export function useIntegrationsStatus() {
   return useQuery({
     queryKey: ["integrations-status"],
-    queryFn: () => request<IntegrationStatus>("/api/integrations/status"),
+    queryFn: getMergedIntegrationStatus,
     refetchInterval: 8000,
   });
 }

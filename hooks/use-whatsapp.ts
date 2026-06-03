@@ -37,11 +37,51 @@ function extractBase64Qr(payload: unknown): string | null {
   return raw.startsWith("data:image") ? raw : `data:image/png;base64,${raw}`;
 }
 
+async function getLocalBridgeStatus(): Promise<EvolutionStatus | null> {
+  if (typeof window === "undefined") return null;
+
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 1800);
+
+  try {
+    const response = await fetch("http://127.0.0.1:8080/health", {
+      cache: "no-store",
+      signal: controller.signal,
+    });
+    if (!response.ok) return null;
+
+    const payload = await response.json();
+    if (!payload?.connected) return null;
+
+    return {
+      connected: true,
+      configured: true,
+      number: payload.ownerJid?.replace(/\D/g, "") || null,
+      raw: {
+        statusSource: "local_baileys_bridge",
+        localBridge: payload,
+      },
+    };
+  } catch {
+    return null;
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+async function getMergedWhatsAppStatus() {
+  const serverStatus = await api.get<EvolutionStatus>("/api/evolution/status");
+  if (serverStatus.connected) return serverStatus;
+
+  const localStatus = await getLocalBridgeStatus();
+  return localStatus || serverStatus;
+}
+
 /** Busca o status da conexão WhatsApp a cada 8 segundos */
 export function useWhatsAppStatus() {
   return useQuery<EvolutionStatus>({
     queryKey: ["evolution-status"],
-    queryFn: () => api.get<EvolutionStatus>("/api/evolution/status"),
+    queryFn: getMergedWhatsAppStatus,
     refetchInterval: 8_000,
     staleTime: 5_000,
     retry: 2,
