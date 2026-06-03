@@ -103,6 +103,7 @@ export type Settings = {
   maxDelaySeconds: number;
   safeMode: boolean;
   defaultCheckoutUrl: string | null;
+  aiPaused: boolean;
   createdAt: string;
   updatedAt: string;
 };

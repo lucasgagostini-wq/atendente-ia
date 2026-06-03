@@ -14,6 +14,8 @@ import {
   Lightning,
   MapPin,
   Megaphone,
+  PauseCircle,
+  PlayCircle,
   Robot,
   Target,
   TrendUp,
@@ -33,6 +35,7 @@ import { Button } from "@/components/ui/button";
 import { useConversations } from "@/hooks/use-conversations";
 import { useLeads } from "@/hooks/use-leads";
 import { useIntegrationsStatus } from "@/hooks/use-integrations";
+import { useAiPausedState, useToggleAiPause } from "@/hooks/use-ai-toggle";
 
 function isSameDay(a: Date, b: Date) {
   return a.getFullYear() === b.getFullYear() &&
@@ -51,8 +54,11 @@ export default function DashboardPage() {
   const { data: leads = [], isLoading: leadsLoading } = useLeads();
   const { data: conversations = [], isLoading: conversationsLoading } = useConversations();
   const { data: integrations } = useIntegrationsStatus();
+  const { data: aiState } = useAiPausedState();
+  const toggleAi = useToggleAiPause();
 
   const loading = leadsLoading || conversationsLoading;
+  const aiPaused = aiState?.aiPaused ?? false;
 
   const metrics = useMemo(() => {
     const today = new Date();
@@ -207,6 +213,21 @@ export default function DashboardPage() {
             </p>
           </div>
           <div className="flex items-center gap-2">
+            {/* Botão de pausa global da IA */}
+            <Button
+              size="sm"
+              variant={aiPaused ? "success" : "destructive"}
+              onClick={() => toggleAi.mutate()}
+              disabled={toggleAi.isPending}
+              className="min-w-[148px] justify-center"
+            >
+              {aiPaused ? (
+                <><PlayCircle size={14} weight="duotone" /> Reativar IA</>
+              ) : (
+                <><PauseCircle size={14} weight="duotone" /> Pausar IA</>
+              )}
+            </Button>
+
             <Link href="/conversas">
               <Button size="sm" variant="secondary">
                 <ChatCircleText size={14} weight="duotone" />
@@ -221,6 +242,35 @@ export default function DashboardPage() {
             </Link>
           </div>
         </div>
+
+        {/* ── Banner de pausa global ──────────────────────────── */}
+        {aiPaused && (
+          <Surface variant="elevated" padding="none" className="overflow-hidden border-amber-700/40">
+            <div className="flex items-center justify-between gap-4 bg-amber-500/8 px-5 py-4">
+              <div className="flex items-center gap-3">
+                <div className="grid size-8 place-items-center rounded-lg bg-amber-500/15 ring-1 ring-amber-500/25">
+                  <PauseCircle size={18} weight="duotone" className="text-amber-400" />
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-amber-300">IA pausada globalmente</p>
+                  <p className="text-xs text-amber-400/70">
+                    Todas as mensagens recebidas estão sendo salvas, mas a IA não está respondendo automaticamente.
+                  </p>
+                </div>
+              </div>
+              <Button
+                size="sm"
+                variant="success"
+                onClick={() => toggleAi.mutate()}
+                disabled={toggleAi.isPending}
+                className="shrink-0"
+              >
+                <PlayCircle size={14} weight="duotone" />
+                Reativar IA
+              </Button>
+            </div>
+          </Surface>
+        )}
 
         {/* ── Setup checklist (só quando não está tudo configurado) ── */}
         {!allSetup && (

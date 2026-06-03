@@ -177,6 +177,8 @@ model Settings {
   maxDelaySeconds       Int      @default(8)
   safeMode              Boolean  @default(true)
   defaultCheckoutUrl    String?
+  // Pausa global da IA — quando true, o webhook salva mensagens mas não responde automaticamente
+  aiPaused              Boolean  @default(false)
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 }

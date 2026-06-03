@@ -10,6 +10,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { conversationService } from "@/services/conversation.service";
 import { evolutionService } from "@/services/evolution.service";
+import { getSettings } from "@/lib/settings-cache";
 import { leadService } from "@/services/lead.service";
 import { openRouterService } from "@/services/openrouter.service";
 import { paymentReceiptService, PixReceiptAnalysis } from "@/services/payment-receipt.service";
@@ -514,9 +515,17 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, transferred: true, sent });
     }
 
+    // ── Pausa global da IA ───────────────────────────────────
+    // Operador pausou todas as respostas automáticas pelo dashboard.
+    // Mensagens são salvas normalmente; só a resposta é suprimida.
+    const globalSettings = await getSettings();
+    if (globalSettings.aiPaused) {
+      return NextResponse.json({ ok: true, aiSkipped: true, reason: "ai_globally_paused" });
+    }
+
     // ── IA desativada para este lead ─────────────────────────
     if (!lead.aiEnabled || lead.humanTakeover) {
-      return NextResponse.json({ ok: true, aiSkipped: true });
+      return NextResponse.json({ ok: true, aiSkipped: true, reason: "ai_disabled_for_lead" });
     }
 
     if (INCOMING_MESSAGE_DEBOUNCE_MS > 0) {
