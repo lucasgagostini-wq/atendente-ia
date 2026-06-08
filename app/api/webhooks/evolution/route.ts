@@ -24,6 +24,7 @@ import {
   detectPaymentReceipt,
   detectIfWaitingPaymentReceipt,
   ensureSalesCTA,
+  hasRecentPixContext,
   safeFallbackForStage,
   sanitizeAIResponse,
   sendPixAsSeparateMessage,
@@ -401,6 +402,21 @@ async function handleReceiptImageMessage(args: {
   };
 }
 
+function buildAiIncomingText(incoming: IncomingPayload, hasRecentPixInHistory: boolean) {
+  if (incoming.type !== "IMAGE" || hasRecentPixInHistory) {
+    return incoming.text;
+  }
+
+  const normalizedText = incoming.text.trim();
+  const imageContextNote = "[Cliente enviou uma foto para restaurar]";
+
+  if (normalizedText.includes(imageContextNote)) {
+    return normalizedText;
+  }
+
+  return `${imageContextNote}\n${normalizedText}`;
+}
+
 // ── Handler ────────────────────────────────────────────────────
 
 export async function POST(request: Request) {
@@ -566,12 +582,37 @@ export async function POST(request: Request) {
     }
 
     const isWaitingReceipt = detectIfWaitingPaymentReceipt(lead.summary);
-
-    if (isWaitingReceipt && detectPaymentReceipt({
+    const recentHistory = await conversationService.getRecentHistory(conversation.id, 10);
+    const hasRecentPixInHistory = hasRecentPixContext({
       incomingText: incoming.text,
+      recentHistory,
       hasPhoto: incoming.type === "IMAGE",
-    })) {
-      const recentHistory = await conversationService.getRecentHistory(conversation.id, 10);
+    });
+
+    if (isWaitingReceipt && incoming.type === "IMAGE" && !hasRecentPixInHistory) {
+      await prisma.log.create({
+        data: {
+          type: "PAYMENT_RECEIPT_SKIPPED",
+          message: "Imagem recebida com flag de comprovante, mas sem PIX recente no histórico",
+          payload: {
+            leadId: lead.id,
+            conversationId: conversation.id,
+            phone: lead.phone,
+            summary: lead.summary,
+          },
+        },
+      }).catch(() => {});
+    }
+
+    if (
+      isWaitingReceipt &&
+      hasRecentPixInHistory &&
+      detectPaymentReceipt({
+        incomingText: incoming.text,
+        recentHistory,
+        hasPhoto: incoming.type === "IMAGE",
+      })
+    ) {
       let receiptResult: {
         text: string;
         stage: string;
@@ -680,12 +721,15 @@ export async function POST(request: Request) {
     }
 
     // ── Resposta da IA ───────────────────────────────────────
-    const [prompt, recentHistory] = await Promise.all([
-      promptService.getActivePrompt(),
-      conversationService.getRecentHistory(conversation.id, 6),
-    ]);
+    const prompt = await promptService.getActivePrompt();
+    const aiRecentHistory = recentHistory.slice(-6);
+    const aiIncomingText = buildAiIncomingText(incoming, hasRecentPixInHistory);
 
-    const systemPrompt = promptService.composeSystemPrompt({ prompt, lead, recentHistory });
+    const systemPrompt = promptService.composeSystemPrompt({
+      prompt,
+      lead,
+      recentHistory: aiRecentHistory,
+    });
     const promptValidation = validatePromptMaster(prompt);
 
     if (!promptValidation.valid) {
@@ -705,12 +749,12 @@ export async function POST(request: Request) {
     const aiResponse = await withTimeout(openRouterService.generateResponse({
       messages: [
         { role: "system", content: systemPrompt },
-        { role: "user", content: incoming.text },
+        { role: "user", content: aiIncomingText },
       ],
       maxTokens: 220,
       safetyContext: {
-        incomingText: incoming.text,
-        recentHistory,
+        incomingText: aiIncomingText,
+        recentHistory: aiRecentHistory,
         hasPhoto: incoming.type === "IMAGE",
       },
     }), AI_RESPONSE_TIMEOUT_MS);
@@ -731,13 +775,13 @@ export async function POST(request: Request) {
     }
 
     const safeResponse = sanitizeAIResponse(aiResponse.output, {
-      incomingText: incoming.text,
-      recentHistory,
+      incomingText: aiIncomingText,
+      recentHistory: aiRecentHistory,
       hasPhoto: incoming.type === "IMAGE",
     });
     const commercialResponse = ensureSalesCTA(safeResponse.output, {
-      incomingText: incoming.text,
-      recentHistory,
+      incomingText: aiIncomingText,
+      recentHistory: aiRecentHistory,
       hasPhoto: incoming.type === "IMAGE",
     });
     const responseMessages = splitResponseIntoWhatsAppMessages(commercialResponse);

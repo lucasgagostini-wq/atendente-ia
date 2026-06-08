@@ -13,6 +13,7 @@ import {
   detectPaymentIntent,
   detectPaymentReceipt,
   ensureSalesCTA,
+  hasRecentPixContext,
   safeFallbackForStage,
   sanitizeAIResponse,
   sendPixAsSeparateMessage,
@@ -174,10 +175,42 @@ assert.equal(
 );
 assert.equal(detectPaymentIntent({ incomingText: "manda o pix" }), true);
 assert.equal(detectPaymentIntent({ incomingText: "como faço pra pagar?" }), true);
-assert.equal(detectPaymentIntent({ incomingText: "fechado, pode mandar" }), true);
+assert.equal(detectPaymentIntent({ incomingText: "fecho, pode mandar a chave" }), true);
+assert.equal(detectPaymentIntent({ incomingText: "quero restaurar" }), false);
+assert.equal(detectPaymentIntent({ incomingText: "bora" }), false);
+assert.equal(detectPaymentIntent({ incomingText: "pode ser" }), false);
 assert.equal(detectPaymentReceipt({ incomingText: "fiz o pix" }), true);
 assert.equal(detectPaymentReceipt({ incomingText: "segue comprovante" }), true);
-assert.equal(detectPaymentReceipt({ incomingText: "", hasPhoto: true }), true);
+assert.equal(
+  hasRecentPixContext({
+    recentHistory: [
+      "Atendente: Claro 😊 pode fazer o PIX por aqui:",
+      `Atendente: Chave PIX: ${PIX_KEY}`,
+      "Atendente: Depois que fizer, me manda o comprovante aqui mesmo que eu já inicio a restauração pra você.",
+    ],
+  }),
+  true,
+);
+assert.equal(detectPaymentReceipt({ incomingText: "", hasPhoto: true }), false);
+assert.equal(
+  detectPaymentReceipt({
+    incomingText: "",
+    hasPhoto: true,
+    recentHistory: [
+      "Atendente: Claro 😊 pode fazer o PIX por aqui:",
+      `Atendente: Chave PIX: ${PIX_KEY}`,
+    ],
+  }),
+  true,
+);
+assert.equal(
+  detectPaymentReceipt({
+    incomingText: "cliente enviou uma foto para restaurar",
+    hasPhoto: true,
+    recentHistory: [],
+  }),
+  false,
+);
 assert.match(
   updateConversationStage("lead quente", PAYMENT_STAGE_WAITING_RECEIPT),
   /\[PAGAMENTO: WAITING_PAYMENT_RECEIPT\]/,
@@ -212,5 +245,17 @@ assert.deepEqual(
     amount: "9.99",
   },
 );
+
+const restorationPhotoContext = {
+  incomingText: "[Cliente enviou uma foto para restaurar]\nsegue a foto da minha avó",
+  recentHistory: ["Lead: oi, tenho uma foto antiga para restaurar"],
+  hasPhoto: true,
+};
+const restorationPhotoReply = ensureSalesCTA(
+  "Recebi a foto. Dá pra trabalhar nela sim.",
+  restorationPhotoContext,
+);
+assert.doesNotMatch(restorationPhotoReply, /comprovante/i);
+assert.match(restorationPhotoReply, /\?$/);
 
 console.log("AI safety scenarios OK");

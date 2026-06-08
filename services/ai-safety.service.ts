@@ -13,6 +13,15 @@ export const PAYMENT_STAGE_WAITING_RECEIPT = "WAITING_PAYMENT_RECEIPT";
 export const PAYMENT_STAGE_RECEIPT_SENT = "PAYMENT_RECEIPT_SENT";
 export const PAYMENT_STAGE_RECEIPT_NEEDS_REVIEW = "RECEIPT_NEEDS_REVIEW";
 
+const RECENT_PIX_CONTEXT_PATTERNS = [
+  /chave pix/i,
+  /estudiofotos000@gmail\.com/i,
+  /nome:\s*lucas agostini/i,
+  /banco:\s*nubank/i,
+  /me manda o comprovante/i,
+  /quer que eu te mande o pix/i,
+];
+
 type SanitizedResponse = {
   output: string;
   blocked: boolean;
@@ -75,19 +84,27 @@ function compactText(context: SafetyContext) {
 
 export function detectPaymentIntent(context: SafetyContext = {}) {
   const text = normalize(context.incomingText).toLowerCase();
-  return /(manda|passa|envia|mande|pode mandar).{0,20}pix|qual.{0,10}pix|pix\??$|como pago|como faço pra pagar|como faco pra pagar|vou fechar|quero fazer|quero restaurar|pode mandar|fechado|bora|vou pagar|aceito|pode ser|quero sim|manda sim|passa sim/.test(
+  return /(manda|passa|envia|mande).{0,20}(pix|chave)|(pode mandar|manda|passa).{0,10}(a )?(chave|pix)|qual.{0,10}pix|qual.{0,10}chave|como pago|como faço pra pagar|como faco pra pagar|quero pagar|vou pagar|vou fazer o pix|vou fazer pix|fazer o pix|fecho|quero fechar|fechar agora/.test(
     text,
+  );
+}
+
+export function hasRecentPixContext(context: SafetyContext = {}) {
+  return (context.recentHistory ?? []).some((item) =>
+    RECENT_PIX_CONTEXT_PATTERNS.some((pattern) => pattern.test(item)),
   );
 }
 
 export function detectPaymentReceipt(context: SafetyContext = {}) {
   const text = normalize(context.incomingText).toLowerCase();
-  return (
-    Boolean(context.hasPhoto) ||
-    /paguei|fiz o pix|fiz pix|pronto|enviei|segue comprovante|comprovante|t[aá] pago|ta pago|acabei de pagar|pagamento feito/.test(
+  const mentionsReceiptOrPayment =
+    /comprovante|paguei|já paguei|ja paguei|fiz o pix|fiz pix|vou mandar o comprovante|segue o comprovante|segue comprovante|enviei o comprovante|pagamento feito|pix feito|pix pago|t[aá] pago|ta pago|acabei de pagar/.test(
       text,
-    )
-  );
+    );
+
+  if (mentionsReceiptOrPayment) return true;
+
+  return Boolean(context.hasPhoto) && hasRecentPixContext(context);
 }
 
 export function detectIfWaitingPaymentReceipt(summary?: string | null) {
