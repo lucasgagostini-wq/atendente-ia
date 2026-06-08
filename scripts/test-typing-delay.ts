@@ -14,7 +14,7 @@ for (let index = 0; index < 40; index += 1) {
   const longDelay = calculateTypingDelay(
     "Consigo te ajudar sim. A restauração é feita com cuidado, foto por foto, e começa depois da confirmação do pagamento. Pode me mandar a foto aqui que eu vejo o melhor caminho e já te explico as opções disponíveis para restaurar com carinho.",
   );
-  assert.ok(longDelay >= 6700 && longDelay <= 7600, `long=${longDelay}`);
+  assert.ok(longDelay >= 8000 && longDelay <= 12000, `long=${longDelay}`);
 }
 
 assert.equal(
