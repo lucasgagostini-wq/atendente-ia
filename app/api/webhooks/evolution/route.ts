@@ -35,7 +35,6 @@ import {
 } from "@/services/ai-safety.service";
 import {
   AI_RESPONSE_TIMEOUT_MS,
-  INCOMING_MESSAGE_DEBOUNCE_MS,
   calculateTypingDelay,
   remainingTypingDelay,
   sleep,
@@ -62,6 +61,21 @@ type PendingInboundMessage = {
   type: "TEXT" | "IMAGE" | "AUDIO";
   createdAt: Date;
 };
+
+type PendingInboundBatchState = {
+  messages: PendingInboundMessage[];
+  firstMessage: PendingInboundMessage | null;
+  latestMessage: PendingInboundMessage | null;
+  hasMedia: boolean;
+  silenceWindowMs: number;
+  elapsedSinceFirstMs: number;
+  quietForMs: number;
+};
+
+const TEXT_SILENCE_WINDOW_MS = 4000;
+const BATCH_SILENCE_WINDOW_MS = 6000;
+const MAX_BATCH_WAIT_MS = 12000;
+const SILENCE_POLL_INTERVAL_MS = 400;
 
 // ── Helpers ────────────────────────────────────────────────────
 
@@ -182,7 +196,33 @@ async function saveAndSendMessages(args: {
   replyTransport?: "baileys_bridge" | "evolution";
   metadata?: Prisma.InputJsonValue;
   typingStartedAt: number;
+  roundInboundMessageId?: string;
 }) {
+  if (args.roundInboundMessageId) {
+    const isCurrent = await isInboundRoundCurrent({
+      conversationId: args.conversationId,
+      leadId: args.leadId,
+      expectedInboundMessageId: args.roundInboundMessageId,
+    });
+
+    if (!isCurrent) {
+      await prisma.log.create({
+        data: {
+          type: "AI_RESPONSE_SKIPPED_STALE",
+          message: `Resposta descartada por rodada antiga para ${args.phone}`,
+          payload: {
+            leadId: args.leadId,
+            conversationId: args.conversationId,
+            phone: args.phone,
+            expectedInboundMessageId: args.roundInboundMessageId,
+          },
+        },
+      }).catch(() => {});
+
+      return { ok: true, stale: true, skipped: true };
+    }
+  }
+
   const fullText = args.messages.join("\n\n");
   const typingDelayMs = calculateTypingDelay(fullText);
   const waitBeforeSendMs = remainingTypingDelay({
@@ -443,6 +483,23 @@ function buildAiIncomingTextFromBatch(
   inboundMessages: PendingInboundMessage[],
   hasRecentPixInHistory: boolean,
 ) {
+  const joinedText = dedupeBatchParts(inboundMessages.map((message) => message.content.trim())).join("\n");
+  const hasPhoto = inboundMessages.some((message) => message.type === "IMAGE");
+  const notes: string[] = [];
+
+  if (hasPhoto && !hasRecentPixInHistory) {
+    notes.push("[Cliente já enviou uma foto para restaurar]");
+  }
+  if (/essa foto|essa aqui|s[oó] essa|\bessa\b|quero que fique|sem mudar muito o rosto|sem mudar o rosto/i.test(joinedText)) {
+    notes.push("[Cliente está falando de uma foto específica]");
+  }
+  if (/av[oó]|avó|avô|m[aã]e|pai|fam[ií]lia|falecid|saudade|lembran[cç]a/i.test(joinedText)) {
+    notes.push("[Cliente mencionou uma lembrança familiar especial]");
+  }
+  if (/pre[cç]o|valor|quanto|custa|fica/i.test(joinedText)) {
+    notes.push("[Cliente perguntou o preço]");
+  }
+
   const parts = inboundMessages.flatMap((message) => {
     if (message.type === "IMAGE") {
       return [buildAiIncomingText(
@@ -459,32 +516,14 @@ function buildAiIncomingTextFromBatch(
     return [message.content.trim()];
   });
 
-  return dedupeBatchParts(parts).join("\n");
+  return dedupeBatchParts([...notes, ...parts]).join("\n");
 }
 
-async function getPendingInboundBatch(args: {
+async function getPendingInboundBatchState(args: {
   conversationId: string;
   leadId: string;
-  currentInboundId: string;
   currentInboundCreatedAt: Date;
-}) {
-  const newerOutboundMessage = await prisma.message.findFirst({
-    where: {
-      conversationId: args.conversationId,
-      leadId: args.leadId,
-      direction: "OUTBOUND",
-      createdAt: { gt: args.currentInboundCreatedAt },
-    },
-    select: { id: true },
-  });
-
-  if (newerOutboundMessage) {
-    return {
-      skip: true,
-      reason: "newer_outbound_already_sent",
-      messages: [] as PendingInboundMessage[],
-    };
-  }
+}): Promise<PendingInboundBatchState> {
 
   const lastOutboundBeforeCurrent = await prisma.message.findFirst({
     where: {
@@ -515,19 +554,86 @@ async function getPendingInboundBatch(args: {
     },
   });
 
-  const latestPendingMessage = pendingMessages.at(-1);
-  if (!latestPendingMessage || latestPendingMessage.id !== args.currentInboundId) {
-    return {
-      skip: true,
-      reason: "newer_message_in_same_batch",
-      messages: pendingMessages as PendingInboundMessage[],
-    };
-  }
+  const firstMessage = pendingMessages[0] ?? null;
+  const latestMessage = pendingMessages.at(-1) ?? null;
+  const hasMedia = pendingMessages.some((message) => message.type !== "TEXT");
+  const silenceWindowMs =
+    hasMedia || pendingMessages.length >= 2 ? BATCH_SILENCE_WINDOW_MS : TEXT_SILENCE_WINDOW_MS;
+  const elapsedSinceFirstMs = firstMessage ? Date.now() - firstMessage.createdAt.getTime() : 0;
+  const quietForMs = latestMessage ? Date.now() - latestMessage.createdAt.getTime() : 0;
 
   return {
-    skip: false,
-    reason: null,
     messages: pendingMessages as PendingInboundMessage[],
+    firstMessage,
+    latestMessage,
+    hasMedia,
+    silenceWindowMs,
+    elapsedSinceFirstMs,
+    quietForMs,
+  };
+}
+
+async function isInboundRoundCurrent(args: {
+  conversationId: string;
+  leadId: string;
+  expectedInboundMessageId: string;
+}) {
+  const latestInboundMessage = await prisma.message.findFirst({
+    where: {
+      conversationId: args.conversationId,
+      leadId: args.leadId,
+      direction: "INBOUND",
+    },
+    orderBy: { createdAt: "desc" },
+    select: { id: true },
+  });
+
+  return latestInboundMessage?.id === args.expectedInboundMessageId;
+}
+
+async function waitForInboundSilence(args: {
+  conversationId: string;
+  leadId: string;
+  currentInboundId: string;
+  currentInboundCreatedAt: Date;
+}) {
+  while (true) {
+    const batchState = await getPendingInboundBatchState({
+      conversationId: args.conversationId,
+      leadId: args.leadId,
+      currentInboundCreatedAt: args.currentInboundCreatedAt,
+    });
+
+    if (!batchState.latestMessage) {
+      return {
+        skip: true,
+        reason: "empty_batch",
+        batchState,
+      };
+    }
+
+    if (batchState.latestMessage.id !== args.currentInboundId) {
+      return {
+        skip: true,
+        reason: "newer_message_in_same_batch",
+        batchState,
+      };
+    }
+
+    if (
+      batchState.quietForMs >= batchState.silenceWindowMs ||
+      batchState.elapsedSinceFirstMs >= MAX_BATCH_WAIT_MS
+    ) {
+      return {
+        skip: false,
+        reason: null,
+        batchState,
+      };
+    }
+
+    const remainingSilenceMs = batchState.silenceWindowMs - batchState.quietForMs;
+    const remainingBatchMs = MAX_BATCH_WAIT_MS - batchState.elapsedSinceFirstMs;
+    await sleep(Math.max(50, Math.min(remainingSilenceMs, remainingBatchMs, SILENCE_POLL_INTERVAL_MS)));
   };
 }
 
@@ -658,57 +764,49 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, aiSkipped: true, reason: "ai_disabled_for_lead" });
     }
 
-    if (INCOMING_MESSAGE_DEBOUNCE_MS > 0) {
-      await sleep(INCOMING_MESSAGE_DEBOUNCE_MS);
-
-      const pendingBatch = await getPendingInboundBatch({
-        conversationId: conversation.id,
-        leadId: lead.id,
-        currentInboundId: inboundMessage.id,
-        currentInboundCreatedAt: inboundMessage.createdAt,
-      });
-
-      if (pendingBatch.skip) {
-        await prisma.log.create({
-          data: {
-            type: "WHATSAPP_MESSAGE_DEBOUNCED",
-            message: "Resposta adiada para consolidar mensagens do mesmo lead",
-            payload: {
-              leadId: lead.id,
-              conversationId: conversation.id,
-              messageId: inboundMessage.id,
-              batchSize: pendingBatch.messages.length,
-              latestBatchMessageId: pendingBatch.messages.at(-1)?.id ?? null,
-              debounceMs: INCOMING_MESSAGE_DEBOUNCE_MS,
-              reason: pendingBatch.reason,
-            },
-          },
-        });
-
-        return NextResponse.json({
-          ok: true,
-          debounced: true,
-          reason: pendingBatch.reason,
-        });
-      }
-    }
-
-    const recentHistory = await conversationService.getRecentHistory(conversation.id, 10);
-    const pendingBatch = await getPendingInboundBatch({
+    const silenceResult = await waitForInboundSilence({
       conversationId: conversation.id,
       leadId: lead.id,
       currentInboundId: inboundMessage.id,
       currentInboundCreatedAt: inboundMessage.createdAt,
     });
+
+    if (silenceResult.skip) {
+      await prisma.log.create({
+        data: {
+          type: "WHATSAPP_MESSAGE_DEBOUNCED",
+          message: "Resposta adiada para consolidar mensagens do mesmo lead",
+          payload: {
+            leadId: lead.id,
+            conversationId: conversation.id,
+            messageId: inboundMessage.id,
+            batchSize: silenceResult.batchState.messages.length,
+            latestBatchMessageId: silenceResult.batchState.latestMessage?.id ?? null,
+            silenceWindowMs: silenceResult.batchState.silenceWindowMs,
+            quietForMs: silenceResult.batchState.quietForMs,
+            elapsedSinceFirstMs: silenceResult.batchState.elapsedSinceFirstMs,
+            reason: silenceResult.reason,
+          },
+        },
+      });
+
+      return NextResponse.json({
+        ok: true,
+        debounced: true,
+        reason: silenceResult.reason,
+      });
+    }
+
+    const recentHistory = await conversationService.getRecentHistory(conversation.id, 10);
     const batchedInboundMessages =
-      pendingBatch.skip || pendingBatch.messages.length === 0
-        ? [{
+      silenceResult.batchState.messages.length > 0
+        ? silenceResult.batchState.messages
+        : [{
             id: inboundMessage.id,
             content: incoming.text,
             type: incoming.type,
             createdAt: inboundMessage.createdAt,
-          } satisfies PendingInboundMessage]
-        : pendingBatch.messages;
+          } satisfies PendingInboundMessage];
     const batchHasPhoto = batchedInboundMessages.some((message) => message.type === "IMAGE");
     const batchedIncomingText = buildAiIncomingTextFromBatch(
       batchedInboundMessages,
@@ -804,6 +902,7 @@ export async function POST(request: Request) {
         messages: [receiptResult.text],
         replyTransport: incoming.replyTransport,
         typingStartedAt,
+        roundInboundMessageId: inboundMessage.id,
         metadata: {
           source: "payment_receipt",
           paymentStage: receiptResult.stage,
@@ -847,6 +946,7 @@ export async function POST(request: Request) {
         messages: paymentMessages,
         replyTransport: incoming.replyTransport,
         typingStartedAt,
+        roundInboundMessageId: inboundMessage.id,
         metadata: {
           source: "payment_intent",
           paymentStage: PAYMENT_STAGE_WAITING_RECEIPT,
@@ -925,6 +1025,27 @@ export async function POST(request: Request) {
       recentHistory: aiRecentHistory,
       hasPhoto: batchHasPhoto,
     });
+
+    if (!(await isInboundRoundCurrent({
+      conversationId: conversation.id,
+      leadId: lead.id,
+      expectedInboundMessageId: inboundMessage.id,
+    }))) {
+      await prisma.log.create({
+        data: {
+          type: "AI_RESPONSE_SKIPPED_STALE",
+          message: "Resposta de IA descartada porque chegou mensagem mais nova durante o processamento",
+          payload: {
+            leadId: lead.id,
+            conversationId: conversation.id,
+            messageId: inboundMessage.id,
+          },
+        },
+      });
+
+      return NextResponse.json({ ok: true, stale: true, reason: "newer_message_during_ai" });
+    }
+
     const responseMessages = splitResponseIntoWhatsAppMessages(commercialResponse);
     const typingDelayMs = calculateTypingDelay(commercialResponse);
     const elapsedSinceTypingStartedMs = Date.now() - typingStartedAt;

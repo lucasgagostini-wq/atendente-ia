@@ -249,6 +249,15 @@ function hasPriceInContext(context: SafetyContext = {}) {
   return /9,99|r\$\s*9|valor|pre[cç]o|fica/i.test(compactText(context));
 }
 
+function isSpecificSinglePhotoContext(context: SafetyContext = {}) {
+  const text = compactText(context);
+  return (
+    hasPhotoInContext(context) &&
+    !/fotos|mais de uma|v[áa]rias|pacote|quantas/.test(text) &&
+    /essa foto|essa aqui|s[oó] essa|\bessa\b|quero que fique|sem mudar muito o rosto|sem mudar o rosto/.test(text)
+  );
+}
+
 export function buildCommercialInstruction(context: SafetyContext = {}) {
   const objectionType = detectObjectionType(context);
   const emotionalContext = detectEmotionalContext(context);
@@ -304,12 +313,10 @@ function normalizeForComparison(value: string) {
 }
 
 function hasSinglePhotoSignal(context: SafetyContext = {}) {
-  const text = compactText(context);
-  return (
+  return isSpecificSinglePhotoContext(context) || (
     Boolean(context.hasPhoto) &&
-    !/fotos|mais de uma|varias|várias|pacote|quantas/.test(text) &&
-    (/essa foto|essa da minha|essa e|quero que fique|sem mudar muito o rosto|foto antiga/.test(text) ||
-      detectEmotionalContext(context) !== "none")
+    !/fotos|mais de uma|varias|várias|pacote|quantas/.test(compactText(context)) &&
+    detectEmotionalContext(context) !== "none"
   );
 }
 
@@ -359,11 +366,35 @@ export function normalizeCommercialResponse(response: string, context: SafetyCon
   let output = normalize(response);
   if (!output) return output;
 
+  const emotionalContext = detectEmotionalContext(context);
+  const singlePhotoContext = isSpecificSinglePhotoContext(context);
+  const askedPrice = detectObjectionType(context) === "price" || hasPriceInContext(context);
+
+  if (singlePhotoContext && askedPrice && emotionalContext === "grandparent") {
+    return [
+      "Recebi a foto. Que lembrança especial da sua avó ❤️",
+      "Dá pra trabalhar nela sim. A ideia é melhorar com cuidado, mantendo o rosto natural e sem deixar artificial.",
+      "Pra fazer essa foto fica R$10. Quer que eu te mande o Pix?",
+    ].join("\n\n");
+  }
+
+  if (singlePhotoContext && askedPrice) {
+    return [
+      "Recebi a foto. Dá pra trabalhar nela sim.",
+      "A ideia é melhorar com cuidado e manter o rosto natural.",
+      "Pra fazer essa foto fica R$10. Quer que eu te mande o Pix?",
+    ].join("\n\n");
+  }
+
   if (
     hasSinglePhotoSignal(context) &&
     /quantas fotos|quantas voce gostaria|quantas você gostaria|mais de uma foto|quer que eu j[aá] comece/i.test(output)
   ) {
-    return "Recebi a foto. Dá pra trabalhar nela sim. A ideia é melhorar com cuidado e manter o rosto natural. Essa fica R$10. Quer que eu te mande o Pix?";
+    return [
+      "Recebi a foto. Dá pra trabalhar nela sim.",
+      "A ideia é melhorar com cuidado e manter o rosto natural.",
+      "Pra fazer essa foto fica R$10. Quer que eu te mande o Pix?",
+    ].join("\n\n");
   }
 
   output = normalizePrePaymentPromises(output, context);
@@ -396,11 +427,9 @@ export function splitResponseIntoWhatsAppMessages(response: string) {
   );
 
   if (parts.length <= 1) return [response.trim()].filter(Boolean);
+  if (parts.length <= 3) return parts;
 
-  const first = parts[0];
-  const second = parts.slice(1).join("\n\n");
-
-  return [first, second].filter(Boolean).slice(0, 2);
+  return [parts[0], parts[1], parts.slice(2).join("\n\n")].filter(Boolean).slice(0, 3);
 }
 
 export function safeFallbackForStage(stage: string) {
