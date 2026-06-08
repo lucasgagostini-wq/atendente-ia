@@ -42,6 +42,23 @@ import {
 
 export const dynamic = "force-dynamic";
 
+// ── Constantes de autenticação ──────────────────────────────────
+
+/**
+ * Segredo compartilhado para autenticar o bridge Baileys.
+ * Quando definido, apenas requests com o header X-Webhook-Secret correto
+ * são aceitos. Se não definido, funciona em modo legado (sem validação).
+ *
+ * Para ativar em produção:
+ * 1. Gere um segredo forte: openssl rand -hex 32
+ * 2. Defina WEBHOOK_SECRET no bridge (.env local)
+ * 3. Defina WEBHOOK_SECRET na Vercel (env vars)
+ * 4. Faça redeploy — ambos precisam estar ativos ao mesmo tempo.
+ *
+ * ⚠️  NÃO ative em produção sem sincronizar os dois lados.
+ */
+const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET;
+
 // ── Tipos ──────────────────────────────────────────────────────
 
 export type IncomingPayload = {
@@ -640,6 +657,32 @@ async function waitForInboundSilence(args: {
 // ── Handler ────────────────────────────────────────────────────
 
 export async function POST(request: Request) {
+  // ── Autenticação do bridge ──────────────────────────────────
+  // Se WEBHOOK_SECRET estiver definida, valida o header X-Webhook-Secret.
+  // Sem a env var → modo legado (aceita qualquer request, compatível com
+  // bridges antigos que ainda não enviam o header).
+  if (WEBHOOK_SECRET) {
+    const incomingSecret = request.headers.get("x-webhook-secret");
+    if (!incomingSecret || incomingSecret !== WEBHOOK_SECRET) {
+      // Retorna 401 para sinalizar falha de auth, mas não causar retry
+      // infinito da Evolution (que ignora status != 200 silenciosamente).
+      prisma.log.create({
+        data: {
+          type: "WEBHOOK_AUTH_FAILED",
+          message: "Requisição rejeitada: X-Webhook-Secret inválido ou ausente",
+          payload: {
+            hasHeader: Boolean(incomingSecret),
+            ip: request.headers.get("x-forwarded-for") ?? null,
+          },
+        },
+      }).catch(() => {});
+      return NextResponse.json(
+        { ok: false, error: "unauthorized" },
+        { status: 401 },
+      );
+    }
+  }
+
   let payload: any;
 
   try {

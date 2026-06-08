@@ -32,13 +32,41 @@ Branch: `melhorias/roadmap` | Iniciado: 2026-06-08
 
 ---
 
-## ⏳ FASE 3 — Webhook auth + API keys
+## ✅ FASE 3 — Webhook auth + API keys
 
 ### [RK1] Assinatura do webhook (bridge ↔ servidor)
-**Status:** ⏳ Aguardando
+**Status:** ✅ Implementado na branch — **🛑 NÃO ativar em produção sem sincronizar os dois lados**
+
+**O que mudou:**
+- `scripts/baileys-bridge.mjs`: lê `WEBHOOK_SECRET` da env; se definido, envia `X-Webhook-Secret` em cada `emitWebhook`
+- `app/api/webhooks/evolution/route.ts`: valida `X-Webhook-Secret` se `WEBHOOK_SECRET` definida no servidor; sem a env var → modo legado (backward-compatible)
+- `.env.example`: documenta `WEBHOOK_SECRET` com instrução de ativação
+- Log `WEBHOOK_AUTH_FAILED` criado quando header inválido/ausente
+
+**Decisão de arquitetura:** Secret simples no header (não HMAC) — suficiente porque:
+1. Transporte é HTTPS (TLS já garante confidencialidade)
+2. Bridge é ponto de origem único e confiável
+3. HMAC adicionaria complexidade sem benefício de segurança adicional nesse contexto
+
+**Para ativar em produção:**
+1. Gerar: `openssl rand -hex 32`
+2. Definir `WEBHOOK_SECRET` no bridge (`.env` local) e reiniciar bridge
+3. Definir `WEBHOOK_SECRET` na Vercel e fazer redeploy
+4. AMBOS devem estar ativos ao mesmo tempo
 
 ### [RK2] API keys em texto plano na tabela Settings
-**Status:** ⏳ Aguardando
+**Status:** ✅ Documentado — sem mudança de código necessária
+
+**Análise do risco:**
+- Supabase PostgreSQL tem **encryption at rest** (AES-256 na infraestrutura)
+- Settings só são acessíveis por admins autenticados — sem API pública expondo os valores
+- App-level encryption adicionaria complexidade sem melhoria de segurança real (a chave de decriptografia teria que estar nos env vars de qualquer jeito)
+- **Padrão "env fallback" já existe** em todos os serviços: `settings.openRouterApiKey || process.env.OPENROUTER_API_KEY`
+
+**Ação recomendada (sem código, apenas configuração):**
+- Mover `OPENROUTER_API_KEY` do banco para o painel da Vercel e deixar campo em branco no banco
+- O fallback `|| process.env.OPENROUTER_API_KEY` continuará funcionando
+- Evolution API key: idem se necessário
 
 ---
 

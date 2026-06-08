@@ -28,6 +28,13 @@ const autoReconnect = process.env.BAILEYS_AUTO_RECONNECT !== "false";
 const autoStart = process.env.BAILEYS_BRIDGE_AUTOSTART === "true";
 
 let webhookUrl = process.env.BAILEYS_BRIDGE_WEBHOOK_URL || "";
+
+// Segredo compartilhado opcional para autenticar o bridge no webhook.
+// Quando definido, é enviado como header X-Webhook-Secret em cada chamada.
+// Para ativar no servidor, defina WEBHOOK_SECRET no painel da Vercel.
+// ATENÇÃO: altere também no servidor (ver docs/AI_PROJECT_CONTEXT.md) antes
+// de definir aqui em produção — caso contrário o webhook rejeitará as mensagens.
+const webhookSecret = process.env.WEBHOOK_SECRET || "";
 let socket = null;
 let socketState = "close";
 let ownerJid = null;
@@ -260,9 +267,14 @@ async function emitWebhook(payload) {
   if (!webhookUrl) return null;
 
   try {
+    const headers = { "Content-Type": "application/json" };
+    if (webhookSecret) {
+      headers["X-Webhook-Secret"] = webhookSecret;
+    }
+
     const response = await fetch(webhookUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify(payload),
     });
 
