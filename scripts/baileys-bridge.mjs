@@ -38,7 +38,13 @@ let manualStop = false;
 let pairingReadyAt = 0;
 let pairingReadyWaiters = [];
 const typingSessions = new Map();
+const leadActivityVersions = new Map();
 const TYPING_BUFFER_MS = Number(process.env.TYPING_BUFFER_MS || 1000);
+const MIN_VISIBLE_TYPING_MS = Number(process.env.MIN_VISIBLE_TYPING_MS || 1500);
+const TEXT_INITIAL_TYPING_MIN_MS = Number(process.env.TEXT_INITIAL_TYPING_MIN_MS || 1500);
+const TEXT_INITIAL_TYPING_MAX_MS = Number(process.env.TEXT_INITIAL_TYPING_MAX_MS || 2500);
+const MEDIA_INITIAL_TYPING_MIN_MS = Number(process.env.MEDIA_INITIAL_TYPING_MIN_MS || 2000);
+const MEDIA_INITIAL_TYPING_MAX_MS = Number(process.env.MEDIA_INITIAL_TYPING_MAX_MS || 3500);
 
 const app = express();
 app.use((_, res, next) => {
@@ -108,6 +114,37 @@ function toJid(phone) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function randomBetween(min, max) {
+  return Math.round(min + Math.random() * (max - min));
+}
+
+function nextLeadActivityVersion(phone) {
+  const digits = normalizePhone(phone);
+  const next = (leadActivityVersions.get(digits) || 0) + 1;
+  leadActivityVersions.set(digits, next);
+  return next;
+}
+
+function isCurrentLeadActivity(phone, version) {
+  return leadActivityVersions.get(normalizePhone(phone)) === version;
+}
+
+function getInitialTypingDelayMs(message) {
+  const hasImage = Boolean(message?.message?.imageMessage || message?.message?.documentMessage);
+  const text =
+    message?.message?.conversation ||
+    message?.message?.extendedTextMessage?.text ||
+    message?.message?.imageMessage?.caption ||
+    message?.message?.documentMessage?.caption ||
+    "";
+
+  if (hasImage || String(text).trim().length > 80) {
+    return randomBetween(MEDIA_INITIAL_TYPING_MIN_MS, MEDIA_INITIAL_TYPING_MAX_MS);
+  }
+
+  return randomBetween(TEXT_INITIAL_TYPING_MIN_MS, TEXT_INITIAL_TYPING_MAX_MS);
 }
 
 function clearTypingSession(number, options = {}) {
@@ -354,18 +391,29 @@ async function startSocket(options = {}) {
         if (!message.key?.remoteJid || message.key.remoteJid.endsWith("@g.us")) continue;
 
         const phone = resolvePhoneFromJid(message.key.remoteJid);
-        const typingStartedAt = Date.now();
-
-        // Inicia "digitando" QUASE IMEDIATAMENTE, antes de baixar mídia e antes
-        // do fetch para a Vercel/IA. Cobertura generosa para sobreviver ao
-        // round-trip da IA (renovada depois com o delay proporcional).
+        const bridgeStartedAt = Date.now();
+        const activityVersion = nextLeadActivityVersion(phone);
+        const initialTypingDelayMs = getInitialTypingDelayMs(message);
         const TYPING_COVER_MS = Number(process.env.TYPING_COVER_MS || 12000);
-        if (phone && socketState === "open") {
+        let typingVisibleAt = null;
+
+        const initialTypingPromise = (async () => {
+          await sleep(initialTypingDelayMs);
+
+          if (!phone || socketState !== "open" || !isCurrentLeadActivity(phone, activityVersion)) {
+            return false;
+          }
+
           await startTypingPresence(phone, TYPING_COVER_MS).catch((error) => {
             console.error("[baileys-bridge] initial typing presence error:", error);
+            return false;
           });
-          console.log(`[typing] composing iniciado para ${phone} ANTES do fetch (cover ${TYPING_COVER_MS}ms)`);
-        }
+          typingVisibleAt = Date.now();
+          console.log(
+            `[typing] composing iniciado para ${phone} APOS ${initialTypingDelayMs}ms (cover ${TYPING_COVER_MS}ms)`,
+          );
+          return true;
+        })();
 
         try {
           const media = await extractIncomingMedia(message);
@@ -387,33 +435,53 @@ async function startSocket(options = {}) {
             },
           });
 
+          await initialTypingPromise;
+
+          if (!isCurrentLeadActivity(phone, activityVersion)) {
+            console.log(`[typing] reply ignorado para ${phone} porque chegou mensagem mais nova`);
+            continue;
+          }
+
           const replies = Array.isArray(webhookResponse?.replies)
             ? webhookResponse.replies
             : webhookResponse?.reply
               ? [webhookResponse.reply]
               : [];
 
-          console.log(`[typing] webhook retornou ${replies.length} reply(s) apos ${Date.now() - typingStartedAt}ms (IA processou)`);
+          console.log(
+            `[typing] webhook retornou ${replies.length} reply(s) apos ${Date.now() - bridgeStartedAt}ms (IA processou)`,
+          );
 
           if (replies.length && socketState === "open") {
             const firstReply = replies[0] || {};
             const firstReplyPhone = normalizePhone(firstReply?.phone || phone);
             const firstTypingDelayMs = Number(firstReply?.typingDelayMs || 0);
-            const elapsedMs = Date.now() - typingStartedAt;
-            // Piso maior (3500-4000ms): mesmo já tendo mostrado "digitando"
-            // durante a IA, segura mais alguns segundos antes de enviar para a
-            // resposta nao parecer instantanea.
+            const totalElapsedMs = Date.now() - bridgeStartedAt;
+            const typingVisibleElapsedMs = typingVisibleAt ? Date.now() - typingVisibleAt : 0;
             const floorMs = 3500 + Math.floor(Math.random() * 500);
-            const remainingDelayMs = Math.max(floorMs, firstTypingDelayMs - elapsedMs);
+            const remainingDelayMs = Math.max(
+              0,
+              floorMs - totalElapsedMs,
+              firstTypingDelayMs - totalElapsedMs,
+              MIN_VISIBLE_TYPING_MS - typingVisibleElapsedMs,
+            );
             if (remainingDelayMs > 0 && firstReplyPhone) {
-              console.log(`[typing] segurando "digitando" por mais ${remainingDelayMs}ms (piso ${floorMs}ms / delay IA ${firstTypingDelayMs}ms) antes de enviar`);
               await startTypingPresence(firstReplyPhone, remainingDelayMs).catch((error) => {
                 console.error("[baileys-bridge] final typing presence error:", error);
               });
+              typingVisibleAt ||= Date.now();
+              console.log(
+                `[typing] segurando "digitando" por mais ${remainingDelayMs}ms (piso ${floorMs}ms / delay IA ${firstTypingDelayMs}ms) antes de enviar`,
+              );
               await sleep(remainingDelayMs);
             }
 
             for (let index = 0; index < replies.length; index += 1) {
+              if (!isCurrentLeadActivity(phone, activityVersion)) {
+                console.log(`[typing] envio cancelado para ${phone} porque chegou mensagem mais nova`);
+                break;
+              }
+
               const reply = replies[index] || {};
               const replyText = String(reply?.text || "").trim();
               const replyPhone = normalizePhone(reply?.phone || phone);
