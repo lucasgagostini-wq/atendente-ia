@@ -1,12 +1,19 @@
 import { FunnelStage, LeadStatus, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 
+const LEADS_DEFAULT_LIMIT = 500;
+const LEADS_MAX_LIMIT = 2000;
+
 type LeadFilters = {
   search?: string;
   stage?: FunnelStage;
   status?: LeadStatus;
   tagId?: string;
   onlyDialable?: boolean;
+  /** Número máximo de leads a retornar. Padrão: 500. Máx: 2000. */
+  limit?: number;
+  /** Offset para paginação (skip). */
+  skip?: number;
 };
 
 type BulkLeadActionInput = {
@@ -46,6 +53,9 @@ class LeadService {
       };
     }
 
+    const limit = Math.min(filters.limit ?? LEADS_DEFAULT_LIMIT, LEADS_MAX_LIMIT);
+    const skip = filters.skip ?? 0;
+
     return prisma.lead.findMany({
       where,
       include: {
@@ -54,6 +64,8 @@ class LeadService {
         },
       },
       orderBy: [{ lastMessageAt: "desc" }, { createdAt: "desc" }],
+      take: limit,
+      skip,
     });
   }
 

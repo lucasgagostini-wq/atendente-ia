@@ -20,23 +20,6 @@ function normalizePhone(phone: string) {
   return cleanPhone;
 }
 
-function stringifyValue(value: unknown) {
-  if (typeof value === "string") return value;
-
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return "";
-  }
-}
-
-function logMatchesTerms(
-  log: { message: string; payload: Prisma.JsonValue | null },
-  terms: string[],
-) {
-  const haystack = `${log.message}\n${stringifyValue(log.payload)}`.toLowerCase();
-  return terms.some((term) => haystack.includes(term.toLowerCase()));
-}
 
 class LeadResetService {
   async resetLeadByPhone(phone: string): Promise<ResetLeadByPhoneResult> {
@@ -67,17 +50,17 @@ class LeadResetService {
       });
 
       const searchTerms = [cleanPhone, lead.id, ...conversationIds];
-      const candidateLogs = await tx.log.findMany({
-        select: {
-          id: true,
-          message: true,
-          payload: true,
-        },
-      });
-
-      const relatedLogIds = candidateLogs
-        .filter((log) => logMatchesTerms(log, searchTerms))
-        .map((log) => log.id);
+      // Filtra os logs diretamente no banco (ILIKE ANY) em vez de carregar
+      // toda a tabela em memória. Em PostgreSQL, `payload::text` permite
+      // pesquisar dentro do JSON sem GIN index.
+      const patterns = searchTerms.map((term) => `%${term}%`);
+      const relatedLogRows = await tx.$queryRaw<{ id: string }[]>`
+        SELECT id
+        FROM "Log"
+        WHERE message ILIKE ANY(${patterns}::text[])
+           OR payload::text ILIKE ANY(${patterns}::text[])
+      `;
+      const relatedLogIds = relatedLogRows.map((row) => row.id);
 
       if (relatedLogIds.length > 0) {
         await tx.log.deleteMany({

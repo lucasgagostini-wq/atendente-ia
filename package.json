@@ -24,7 +24,8 @@
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:public": "playwright test --project=smoke-public",
-    "setup:e2e-user": "tsx scripts/setup-e2e-user.ts"
+    "setup:e2e-user": "tsx scripts/setup-e2e-user.ts",
+    "prune-logs": "tsx scripts/prune-logs.ts"
   },
   "dependencies": {
     "@hapi/boom": "^10.0.1",

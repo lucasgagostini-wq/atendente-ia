@@ -296,6 +296,14 @@ export default function LeadsPage() {
         </p>
       </div>
 
+      {/* Aviso quando resultado está no limite de paginação */}
+      {leads.length >= 500 && (
+        <div className="flex items-center gap-2 rounded-lg border border-amber-600/30 bg-amber-500/8 px-3 py-2 text-xs text-amber-400">
+          <span className="font-medium">Exibindo os primeiros 500 leads.</span>
+          Use os filtros acima para refinar a busca e encontrar leads específicos.
+        </div>
+      )}
+
       <Card>
         <CardHeader className="space-y-3">
           <CardTitle>Filtros e tags</CardTitle>

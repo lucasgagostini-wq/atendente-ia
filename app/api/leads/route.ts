@@ -14,12 +14,17 @@ function toNullable(value?: string | null) {
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = request.nextUrl;
+    const limitParam = searchParams.get("limit");
+    const skipParam = searchParams.get("skip");
+
     const leads = await leadService.getLeads({
       search: searchParams.get("search") ?? undefined,
       stage: (searchParams.get("stage") as FunnelStage | null) ?? undefined,
       status: (searchParams.get("status") as LeadStatus | null) ?? undefined,
       tagId: searchParams.get("tagId") ?? undefined,
       onlyDialable: searchParams.get("onlyDialable") === "true",
+      limit: limitParam ? Number(limitParam) : undefined,
+      skip: skipParam ? Number(skipParam) : undefined,
     });
     return NextResponse.json(leads);
   } catch (error) {
