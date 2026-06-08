@@ -355,62 +355,89 @@ async function startSocket(options = {}) {
 
         const phone = resolvePhoneFromJid(message.key.remoteJid);
         const typingStartedAt = Date.now();
-        const media = await extractIncomingMedia(message);
 
-        const webhookResponse = await emitWebhook({
-          event: "MESSAGES_UPSERT",
-          data: {
-            phone,
-            replyTransport: "baileys_bridge",
-            key: {
-              remoteJid: message.key.remoteJid,
-              id: message.key.id || null,
-              fromMe: false,
+        // Inicia "digitando" QUASE IMEDIATAMENTE, antes de baixar mídia e antes
+        // do fetch para a Vercel/IA. Cobertura generosa para sobreviver ao
+        // round-trip da IA (renovada depois com o delay proporcional).
+        const TYPING_COVER_MS = Number(process.env.TYPING_COVER_MS || 12000);
+        if (phone && socketState === "open") {
+          await startTypingPresence(phone, TYPING_COVER_MS).catch((error) => {
+            console.error("[baileys-bridge] initial typing presence error:", error);
+          });
+          console.log(`[typing] composing iniciado para ${phone} ANTES do fetch (cover ${TYPING_COVER_MS}ms)`);
+        }
+
+        try {
+          const media = await extractIncomingMedia(message);
+
+          const webhookResponse = await emitWebhook({
+            event: "MESSAGES_UPSERT",
+            data: {
+              phone,
+              replyTransport: "baileys_bridge",
+              key: {
+                remoteJid: message.key.remoteJid,
+                id: message.key.id || null,
+                fromMe: false,
+              },
+              message: message.message,
+              media,
+              messageTimestamp: message.messageTimestamp || null,
+              pushName: message.pushName || null,
             },
-            message: message.message,
-            media,
-            messageTimestamp: message.messageTimestamp || null,
-            pushName: message.pushName || null,
-          },
-        });
+          });
 
-        const replies = Array.isArray(webhookResponse?.replies)
-          ? webhookResponse.replies
-          : webhookResponse?.reply
-            ? [webhookResponse.reply]
-            : [];
+          const replies = Array.isArray(webhookResponse?.replies)
+            ? webhookResponse.replies
+            : webhookResponse?.reply
+              ? [webhookResponse.reply]
+              : [];
 
-        if (replies.length && socketState === "open") {
-          const firstReply = replies[0] || {};
-          const firstReplyPhone = normalizePhone(firstReply?.phone || phone);
-          const firstTypingDelayMs = Number(firstReply?.typingDelayMs || 0);
-          const elapsedMs = Date.now() - typingStartedAt;
-          const remainingDelayMs = Math.max(1500, firstTypingDelayMs - elapsedMs);
-          if (remainingDelayMs > 0 && firstReplyPhone) {
-            await startTypingPresence(firstReplyPhone, remainingDelayMs).catch((error) => {
-              console.error("[baileys-bridge] final typing presence error:", error);
-            });
-            await sleep(remainingDelayMs);
-          }
+          console.log(`[typing] webhook retornou ${replies.length} reply(s) apos ${Date.now() - typingStartedAt}ms (IA processou)`);
 
-          for (let index = 0; index < replies.length; index += 1) {
-            const reply = replies[index] || {};
-            const replyText = String(reply?.text || "").trim();
-            const replyPhone = normalizePhone(reply?.phone || phone);
-
-            if (!replyText || !replyPhone) continue;
-
-            if (index > 0) {
-              const betweenMessagesTypingMs = index === 1 ? 1400 : 1200;
-              await startTypingPresence(replyPhone, betweenMessagesTypingMs).catch((error) => {
-                console.error("[baileys-bridge] between-message typing error:", error);
+          if (replies.length && socketState === "open") {
+            const firstReply = replies[0] || {};
+            const firstReplyPhone = normalizePhone(firstReply?.phone || phone);
+            const firstTypingDelayMs = Number(firstReply?.typingDelayMs || 0);
+            const elapsedMs = Date.now() - typingStartedAt;
+            // Piso maior (3500-4000ms): mesmo já tendo mostrado "digitando"
+            // durante a IA, segura mais alguns segundos antes de enviar para a
+            // resposta nao parecer instantanea.
+            const floorMs = 3500 + Math.floor(Math.random() * 500);
+            const remainingDelayMs = Math.max(floorMs, firstTypingDelayMs - elapsedMs);
+            if (remainingDelayMs > 0 && firstReplyPhone) {
+              console.log(`[typing] segurando "digitando" por mais ${remainingDelayMs}ms (piso ${floorMs}ms / delay IA ${firstTypingDelayMs}ms) antes de enviar`);
+              await startTypingPresence(firstReplyPhone, remainingDelayMs).catch((error) => {
+                console.error("[baileys-bridge] final typing presence error:", error);
               });
-              await sleep(betweenMessagesTypingMs);
+              await sleep(remainingDelayMs);
             }
 
-            await sock.sendMessage(toJid(replyPhone), { text: replyText });
-            clearTypingSession(replyPhone, { pause: true });
+            for (let index = 0; index < replies.length; index += 1) {
+              const reply = replies[index] || {};
+              const replyText = String(reply?.text || "").trim();
+              const replyPhone = normalizePhone(reply?.phone || phone);
+
+              if (!replyText || !replyPhone) continue;
+
+              if (index > 0) {
+                const betweenMessagesTypingMs = index === 1 ? 1400 : 1200;
+                await startTypingPresence(replyPhone, betweenMessagesTypingMs).catch((error) => {
+                  console.error("[baileys-bridge] between-message typing error:", error);
+                });
+                await sleep(betweenMessagesTypingMs);
+              }
+
+              await sock.sendMessage(toJid(replyPhone), { text: replyText });
+              clearTypingSession(replyPhone, { pause: true });
+              console.log(`[typing] mensagem ${index + 1}/${replies.length} enviada para ${replyPhone} (${replyText.length} chars)`);
+            }
           }
+        } finally {
+          // Garante que a presenca nunca fique presa em "digitando", mesmo se a
+          // IA falhar, o fetch retornar null ou ocorrer erro no envio.
+          clearTypingSession(phone, { pause: true });
+          console.log(`[typing] presenca pausada (paused) para ${phone} no final`);
         }
       }
     });
