@@ -8,6 +8,7 @@ import {
   CheckCircle,
   Command,
   MagnifyingGlass,
+  TerminalWindow,
   WarningCircle,
   X,
 } from "@phosphor-icons/react";
@@ -90,6 +91,17 @@ export function AdminCommandPalette() {
     setPendingCommandId(null);
   }, [isRunning]);
 
+  const togglePalette = useCallback(() => {
+    if (isRunning) return;
+
+    if (isOpen) {
+      closePalette();
+      return;
+    }
+
+    openPalette();
+  }, [closePalette, isOpen, isRunning, openPalette]);
+
   const executeCommand = useCallback(async (command: AdminConsoleCommandDefinition) => {
     setIsRunning(true);
 
@@ -149,17 +161,22 @@ export function AdminCommandPalette() {
     function onKeyDown(event: KeyboardEvent) {
       if (event.defaultPrevented || event.isComposing) return;
 
-      const shouldOpen =
-        !isOpen &&
+      const isQuoteShortcut =
         !event.ctrlKey &&
         !event.metaKey &&
         !event.altKey &&
-        !isEditableTarget(event.target) &&
         (event.key === "'" || event.code === "Quote");
+      const isCommandShortcut =
+        (event.ctrlKey || event.metaKey) &&
+        !event.altKey &&
+        event.key.toLowerCase() === "k";
+      const shouldToggle =
+        (isQuoteShortcut || isCommandShortcut) &&
+        (isOpen || !isEditableTarget(event.target));
 
-      if (shouldOpen) {
+      if (shouldToggle) {
         event.preventDefault();
-        openPalette();
+        togglePalette();
         return;
       }
 
@@ -216,11 +233,23 @@ export function AdminCommandPalette() {
     filteredCommands,
     handlePrimaryAction,
     isOpen,
-    openPalette,
     pendingCommandId,
+    togglePalette,
   ]);
 
-  if (!isOpen) return null;
+  if (!isOpen) {
+    return (
+      <button
+        type="button"
+        onClick={openPalette}
+        title="Comandos rápidos"
+        aria-label="Comandos rápidos"
+        className="fixed bottom-5 right-5 z-50 grid size-10 place-items-center rounded-lg border border-zinc-800/80 bg-zinc-900/90 text-zinc-400 shadow-xl shadow-black/30 backdrop-blur transition-all hover:border-indigo-500/40 hover:bg-indigo-500/10 hover:text-indigo-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50"
+      >
+        <TerminalWindow size={17} weight="duotone" />
+      </button>
+    );
+  }
 
   return (
     <div className="fixed inset-0 z-[100] flex items-start justify-center px-4 py-14 sm:px-6">
@@ -350,6 +379,7 @@ export function AdminCommandPalette() {
                 <span>abre em qualquer tela autenticada</span>
               </div>
               <div className="flex items-center gap-2">
+                <span className="rounded-md border border-zinc-800/80 bg-zinc-900/70 px-2 py-1">Ctrl K abre</span>
                 <span className="rounded-md border border-zinc-800/80 bg-zinc-900/70 px-2 py-1">Esc fecha</span>
                 <span className="rounded-md border border-zinc-800/80 bg-zinc-900/70 px-2 py-1">Enter executa</span>
               </div>
