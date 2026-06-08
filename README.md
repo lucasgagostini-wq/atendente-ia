@@ -233,9 +233,22 @@ O seed cria a atendente `Camila` com:
 - pausa de IA ao pedir humano
 - sem invenções e sem tom robótico
 
+## Contexto para IA / Claude / Codex
+
+Ao iniciar qualquer sessão de desenvolvimento, rode:
+
+```bash
+npm run ai:check
+```
+
+Esse comando imprime um resumo rápido do projeto: URLs, números, PIX, preços, comandos,
+arquivos críticos e próximo teste recomendado. O contexto técnico completo está em
+`docs/AI_PROJECT_CONTEXT.md`.
+
 ## Scripts e validação
 
 ```bash
+npm run ai:check          # resumo de contexto para IA/humano
 npm run lint              # ESLint
 npm run build             # Prisma generate + build de produção
 npm run check             # lint + build
