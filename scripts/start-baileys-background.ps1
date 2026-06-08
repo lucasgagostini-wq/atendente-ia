@@ -22,7 +22,7 @@ $env:BAILEYS_AUTO_RECONNECT = "true"
 
 $process = Start-Process `
   -FilePath "node.exe" `
-  -ArgumentList "scripts/baileys-bridge.mjs" `
+  -ArgumentList @("--env-file=.env", "scripts/baileys-bridge.mjs") `
   -WorkingDirectory $Root `
   -WindowStyle Hidden `
   -RedirectStandardOutput $OutLog `

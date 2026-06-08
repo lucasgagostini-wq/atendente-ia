@@ -83,7 +83,7 @@ async function main() {
 
   // ── 1. Bridge WhatsApp ──────────────────────────────────
   log("1/3", "Iniciando WhatsApp (conexão automática)...");
-  startProcess("bridge", "node", ["scripts/baileys-bridge.mjs"], {
+  startProcess("bridge", "node", ["--env-file=.env", "scripts/baileys-bridge.mjs"], {
     BAILEYS_BRIDGE_PORT: String(BRIDGE_PORT),
     BAILEYS_BRIDGE_API_KEY: "local-bridge-key",
     BAILEYS_BRIDGE_INSTANCE_NAME: "atendente-ia",
