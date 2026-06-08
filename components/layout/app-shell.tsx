@@ -8,6 +8,7 @@ import {
   Robot,
   SignOut,
 } from "@phosphor-icons/react";
+import { AdminCommandPalette } from "@/components/admin-console/admin-command-palette";
 import { cn } from "@/lib/utils";
 import { buildBreadcrumbItems, getPageContext, navGroups } from "@/lib/navigation";
 
@@ -40,6 +41,7 @@ export function AppShell({ children }: Props) {
 
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
+      <AdminCommandPalette />
       <div className="mx-auto flex min-h-screen w-full max-w-[1680px]">
 
         {/* ── Sidebar ───────────────────────────────────── */}
