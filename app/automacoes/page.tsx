@@ -2,7 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 import { Automation } from "@/types";
 import { Badge } from "@/components/ui/badge";
@@ -95,6 +95,21 @@ export default function AutomacoesPage() {
         <p className="mt-1 text-sm text-zinc-400">
           Follow-up inteligente por condição, delay e status ativo/inativo.
         </p>
+      </div>
+
+      {/* Banner de aviso — execução ainda não implementada */}
+      <div className="flex items-start gap-3 rounded-lg border border-amber-600/30 bg-amber-500/8 px-4 py-3">
+        <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-400" />
+        <div className="space-y-0.5">
+          <p className="text-sm font-medium text-amber-300">
+            Funcionalidade em desenvolvimento
+          </p>
+          <p className="text-xs text-amber-400/80">
+            As regras abaixo são salvas no banco de dados, mas <strong>ainda não são disparadas automaticamente</strong>.
+            A execução real requer um job agendado (Vercel Cron ou worker dedicado), que será implementado em versão futura.
+            Por enquanto, use os <strong>Disparos Manuais</strong> para enviar mensagens em lote.
+          </p>
+        </div>
       </div>
 
       <Card>
