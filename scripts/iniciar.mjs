@@ -17,7 +17,7 @@ import path from "node:path";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, "..");
 
-const APP_URL = "http://localhost:3000";
+const APP_URL = "https://atendente-ia-eight.vercel.app";
 const BRIDGE_PORT = 8080;
 
 // Cores para o terminal

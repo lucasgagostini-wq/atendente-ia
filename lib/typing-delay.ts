@@ -5,7 +5,7 @@ export const SHORT_TYPING_DELAY_MS = Number(process.env.SHORT_TYPING_DELAY_MS ||
 export const MEDIUM_TYPING_DELAY_MS = Number(process.env.MEDIUM_TYPING_DELAY_MS || 5000);
 export const LONG_TYPING_DELAY_MS = Number(process.env.LONG_TYPING_DELAY_MS || 7000);
 export const TYPING_BUFFER_MS = Number(process.env.TYPING_BUFFER_MS || 1000);
-export const MAX_TYPING_DELAY_MS = Number(process.env.MAX_TYPING_DELAY_MS || 8500);
+export const MAX_TYPING_DELAY_MS = Number(process.env.MAX_TYPING_DELAY_MS || 15000);
 export const AI_RESPONSE_TIMEOUT_MS = Number(process.env.AI_RESPONSE_TIMEOUT_MS || 12000);
 export const AI_FAST_RESPONSE_MIN_DELAY_MS = Number(
   process.env.AI_FAST_RESPONSE_MIN_DELAY_MS || MIN_TYPING_DELAY_MS,
@@ -31,7 +31,7 @@ export function calculateTypingDelay(message: string) {
     return clamp(getRandomDelay(4700, 5600), MIN_TYPING_DELAY_MS, MAX_TYPING_DELAY_MS);
   }
 
-  return clamp(getRandomDelay(6700, 7600), MIN_TYPING_DELAY_MS, MAX_TYPING_DELAY_MS);
+  return clamp(getRandomDelay(8000, 12000), MIN_TYPING_DELAY_MS, MAX_TYPING_DELAY_MS);
 }
 
 export function remainingTypingDelay(args: {
