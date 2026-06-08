@@ -19,7 +19,8 @@
     "bridge:baileys": "node scripts/baileys-bridge.mjs",
     "start:local": "concurrently --names \"APP,WHATSAPP\" --prefix-colors \"cyan,green\" \"npm run dev\" \"npm run bridge:baileys\"",
     "whatsapp": "node scripts/start-whatsapp.mjs",
-    "ai:check": "tsx scripts/ai-check.ts"
+    "ai:check": "tsx scripts/ai-check.ts",
+    "test:webhook-logic": "tsx scripts/test-webhook-logic.ts"
   },
   "dependencies": {
     "@hapi/boom": "^10.0.1",

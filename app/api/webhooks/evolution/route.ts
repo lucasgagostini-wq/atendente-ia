@@ -44,7 +44,7 @@ export const dynamic = "force-dynamic";
 
 // ── Tipos ──────────────────────────────────────────────────────
 
-type IncomingPayload = {
+export type IncomingPayload = {
   phone: string;
   text: string;
   messageId: string | null;
@@ -55,7 +55,7 @@ type IncomingPayload = {
   metadata?: Prisma.InputJsonValue;
 };
 
-type PendingInboundMessage = {
+export type PendingInboundMessage = {
   id: string;
   content: string;
   type: "TEXT" | "IMAGE" | "AUDIO";
@@ -80,12 +80,12 @@ const SILENCE_POLL_INTERVAL_MS = 400;
 // ── Helpers ────────────────────────────────────────────────────
 
 /** Remove todos os não-dígitos de telefones/JIDs do WhatsApp */
-function normalizePhone(raw: string): string {
+export function normalizePhone(raw: string): string {
   return raw.replace(/\D/g, "");
 }
 
 /** Extrai os campos relevantes do payload da Evolution API / Baileys */
-function extractIncomingPayload(payload: any): IncomingPayload | null {
+export function extractIncomingPayload(payload: any): IncomingPayload | null {
   const messageNode =
     payload?.data?.message ||
     payload?.data?.messages?.[0]?.message ||
@@ -184,7 +184,7 @@ function extractIncomingPayload(payload: any): IncomingPayload | null {
 }
 
 /** Verifica se a mensagem deve ser transferida para humano */
-function shouldTransferToHuman(message: string): boolean {
+export function shouldTransferToHuman(message: string): boolean {
   return /(humano|atendente|pessoa real|suporte humano|falar com algu[eé]m|quero falar com)/i.test(message);
 }
 
@@ -331,7 +331,7 @@ type ReceiptPaymentStage =
   | typeof PAYMENT_STAGE_RECEIPT_SENT
   | typeof PAYMENT_STAGE_RECEIPT_NEEDS_REVIEW;
 
-function receiptDecisionFromAnalysis(analysis: PixReceiptAnalysis): {
+export function receiptDecisionFromAnalysis(analysis: PixReceiptAnalysis): {
   stage: ReceiptPaymentStage;
   message: string;
   alert: string;
@@ -450,7 +450,7 @@ async function handleReceiptImageMessage(args: {
   };
 }
 
-function buildAiIncomingText(incoming: IncomingPayload, hasRecentPixInHistory: boolean) {
+export function buildAiIncomingText(incoming: IncomingPayload, hasRecentPixInHistory: boolean) {
   if (incoming.type !== "IMAGE" || hasRecentPixInHistory) {
     return incoming.text;
   }
@@ -465,7 +465,7 @@ function buildAiIncomingText(incoming: IncomingPayload, hasRecentPixInHistory: b
   return `${imageContextNote}\n${normalizedText}`;
 }
 
-function dedupeBatchParts(parts: string[]) {
+export function dedupeBatchParts(parts: string[]) {
   const seen = new Set<string>();
   const output: string[] = [];
 
@@ -479,7 +479,7 @@ function dedupeBatchParts(parts: string[]) {
   return output;
 }
 
-function buildAiIncomingTextFromBatch(
+export function buildAiIncomingTextFromBatch(
   inboundMessages: PendingInboundMessage[],
   hasRecentPixInHistory: boolean,
 ) {
