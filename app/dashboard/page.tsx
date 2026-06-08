@@ -220,23 +220,25 @@ export default function DashboardPage() {
               onClick={() => toggleAi.mutate()}
               disabled={toggleAi.isPending}
               className="min-w-[148px] justify-center"
+              aria-label={aiPaused ? "Reativar IA globalmente" : "Pausar IA globalmente"}
+              aria-pressed={aiPaused}
             >
               {aiPaused ? (
-                <><PlayCircle size={14} weight="duotone" /> Reativar IA</>
+                <><PlayCircle size={14} weight="duotone" aria-hidden="true" /> Reativar IA</>
               ) : (
-                <><PauseCircle size={14} weight="duotone" /> Pausar IA</>
+                <><PauseCircle size={14} weight="duotone" aria-hidden="true" /> Pausar IA</>
               )}
             </Button>
 
             <Link href="/conversas">
               <Button size="sm" variant="secondary">
-                <ChatCircleText size={14} weight="duotone" />
+                <ChatCircleText size={14} weight="duotone" aria-hidden="true" />
                 Ver conversas
               </Button>
             </Link>
             <Link href="/configuracoes">
               <Button size="sm" variant="outline">
-                <Gear size={14} />
+                <Gear size={14} aria-hidden="true" />
                 Configurar
               </Button>
             </Link>
@@ -459,7 +461,7 @@ export default function DashboardPage() {
         </div>
 
         {/* ── Métricas ────────────────────────────────── */}
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-busy={loading} aria-label="Métricas da operação">
           <MetricCard title="Total de leads"      value={loading ? "—" : metrics.totalLeads}       description="Base total no funil"      icon={Users}          color="indigo" />
           <MetricCard title="Conversas abertas"   value={loading ? "—" : metrics.openConversations} description="Aguardando atendimento"   icon={ChatCircleText} color="sky"    />
           <MetricCard title="Mensagens hoje"      value={loading ? "—" : metrics.messagesToday}    description="Atividade nas últimas 24h" icon={TrendUp}        color="emerald" />
@@ -483,10 +485,10 @@ export default function DashboardPage() {
               </Link>
             </div>
 
-            <div className="divide-y divide-zinc-800/40">
+            <div className="divide-y divide-zinc-800/40" aria-live="polite" aria-busy={loading}>
               {loading && (
-                <div className="space-y-2 p-4">
-                  {[...Array(4)].map((_, i) => <div key={i} className="skeleton h-14 rounded-lg" />)}
+                <div className="space-y-2 p-4" role="status" aria-label="Carregando atividade recente...">
+                  {[...Array(4)].map((_, i) => <div key={i} className="skeleton h-14 rounded-lg" aria-hidden="true" />)}
                 </div>
               )}
               {!loading && recentActivity.length === 0 && (

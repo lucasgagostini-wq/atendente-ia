@@ -75,11 +75,11 @@ function Initials({ name }: { name: string }) {
 
 function TypingIndicator() {
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2" role="status" aria-label="IA digitando...">
       <div className="flex items-center gap-1 rounded-2xl rounded-bl-sm border border-zinc-700/60 bg-zinc-800/80 px-3.5 py-2.5">
-        <span className="typing-dot size-1.5 rounded-full bg-zinc-400" />
-        <span className="typing-dot size-1.5 rounded-full bg-zinc-400" />
-        <span className="typing-dot size-1.5 rounded-full bg-zinc-400" />
+        <span aria-hidden="true" className="typing-dot size-1.5 rounded-full bg-zinc-400" />
+        <span aria-hidden="true" className="typing-dot size-1.5 rounded-full bg-zinc-400" />
+        <span aria-hidden="true" className="typing-dot size-1.5 rounded-full bg-zinc-400" />
       </div>
     </div>
   );
@@ -192,21 +192,23 @@ export default function ConversasPage() {
 
           {/* Search */}
           <div className="relative mt-3">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-zinc-500" />
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-zinc-500" aria-hidden="true" />
             <Input
               className="h-8 pl-8 text-xs"
               placeholder="Buscar por nome ou número..."
+              aria-label="Buscar conversas por nome ou número"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
 
           {/* Stage filter */}
-          <div className="mt-2 flex gap-1 overflow-x-auto pb-1 scrollbar-thin">
+          <div className="mt-2 flex gap-1 overflow-x-auto pb-1 scrollbar-thin" role="group" aria-label="Filtrar por etapa do funil">
             {stageOptions.map((opt) => (
               <button
                 key={opt.value}
                 onClick={() => setStageFilter(opt.value)}
+                aria-pressed={stageFilter === opt.value}
                 className={`shrink-0 rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors ${
                   stageFilter === opt.value
                     ? "bg-indigo-500/15 text-indigo-400 ring-1 ring-indigo-500/20"
@@ -245,6 +247,8 @@ export default function ConversasPage() {
               <button
                 key={conv.id}
                 onClick={() => setSelectedConversationId(conv.id)}
+                aria-current={active ? "true" : undefined}
+                aria-label={`${name} — ${stageLabelMap[stage]}${isOpen ? " — aberta" : ""}${latest ? ` — ${latest.content.slice(0, 60)}` : ""}`}
                 className={`group relative w-full border-b border-zinc-800/40 px-3 py-3 text-left transition-colors last:border-0 ${
                   active
                     ? "bg-indigo-500/8 border-l-2 border-l-indigo-400"
@@ -255,7 +259,7 @@ export default function ConversasPage() {
                   <div className="relative mt-0.5">
                     <Initials name={name} />
                     {isOpen && (
-                      <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-emerald-400 ring-1 ring-zinc-900 status-pulse" />
+                      <span aria-hidden="true" className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-emerald-400 ring-1 ring-zinc-900 status-pulse" />
                     )}
                   </div>
 
@@ -320,7 +324,7 @@ export default function ConversasPage() {
                 <div className="relative">
                   <Initials name={lead?.name || "L"} />
                   {selected.status === "OPEN" && (
-                    <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-emerald-400 ring-1 ring-zinc-900 status-pulse" />
+                    <span aria-hidden="true" className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-emerald-400 ring-1 ring-zinc-900 status-pulse" />
                   )}
                 </div>
                 <div>
@@ -342,26 +346,43 @@ export default function ConversasPage() {
                     )}
                   </div>
                   <p className="mt-0.5 flex items-center gap-1 text-xs text-zinc-500">
-                    <Phone className="size-3" />
-                    {formatPhone(lead?.phone || "-")}
+                    <Phone className="size-3" aria-hidden="true" />
+                    <span>{formatPhone(lead?.phone || "-")}</span>
                   </p>
                 </div>
               </div>
 
               <div className="flex items-center gap-1.5">
-                <Button size="sm" variant="outline" onClick={toggleAi} disabled={updateLead.isPending}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={toggleAi}
+                  disabled={updateLead.isPending}
+                  aria-label={lead?.aiEnabled ? "Pausar IA para este lead" : "Ativar IA para este lead"}
+                >
                   {lead?.aiEnabled ? (
-                    <><ZapOff className="size-3.5" /> Pausar IA</>
+                    <><ZapOff className="size-3.5" aria-hidden="true" /> Pausar IA</>
                   ) : (
-                    <><Zap className="size-3.5" /> Ativar IA</>
+                    <><Zap className="size-3.5" aria-hidden="true" /> Ativar IA</>
                   )}
                 </Button>
-                <Button size="sm" variant="outline" onClick={assumeHuman} disabled={updateLead.isPending}>
-                  <UserRoundCog className="size-3.5" />
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={assumeHuman}
+                  disabled={updateLead.isPending}
+                  aria-label="Assumir atendimento humano"
+                >
+                  <UserRoundCog className="size-3.5" aria-hidden="true" />
                   Assumir
                 </Button>
-                <Button size="sm" variant="ghost" onClick={archiveConversation}>
-                  <Archive className="size-3.5" />
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={archiveConversation}
+                  aria-label="Arquivar conversa"
+                >
+                  <Archive className="size-3.5" aria-hidden="true" />
                 </Button>
               </div>
             </div>
@@ -458,7 +479,7 @@ export default function ConversasPage() {
                                 ? "bg-indigo-500/15 ring-indigo-500/20 text-indigo-400"
                                 : "bg-zinc-800 ring-zinc-700/50 text-zinc-400"
                             } text-xs font-semibold`}>
-                              {isAi ? <Bot className="size-3.5" /> : <UserRound className="size-3.5" />}
+                              {isAi ? <Bot className="size-3.5" aria-hidden="true" /> : <UserRound className="size-3.5" aria-hidden="true" />}
                             </div>
                           </div>
                         )}
@@ -487,6 +508,7 @@ export default function ConversasPage() {
               <div className="flex-1 relative">
                 <Input
                   placeholder={lead?.aiEnabled ? "Mensagem manual (IA está respondendo)..." : "Responder..."}
+                  aria-label="Digitar mensagem manual"
                   value={manualMessage}
                   onChange={(e) => setManualMessage(e.target.value)}
                   className="pr-10"
