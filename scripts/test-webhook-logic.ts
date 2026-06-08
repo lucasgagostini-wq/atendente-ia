@@ -23,7 +23,7 @@ import {
   receiptDecisionFromAnalysis,
   dedupeBatchParts,
   type PendingInboundMessage,
-} from "../app/api/webhooks/evolution/route";
+} from "../lib/webhook-helpers";
 import {
   PAYMENT_STAGE_WAITING_RECEIPT,
   PAYMENT_STAGE_RECEIPT_SENT,
