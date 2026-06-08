@@ -100,13 +100,16 @@ Esse script executa:
 
 ## Configuração de ambiente (.env)
 
-Campos obrigatórios:
+A lista completa e comentada está em `.env.example`. Campos essenciais:
 
 ```env
 DATABASE_URL=
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
+# Autenticação do painel (OBRIGATÓRIO em produção — sem isso o JWT usa "dev-secret")
+ADMIN_SESSION_SECRET=
+ADMIN_SETUP_TOKEN=
 EVOLUTION_API_URL=
 EVOLUTION_API_KEY=
 EVOLUTION_INSTANCE_NAME=
@@ -116,6 +119,9 @@ APIFY_API_TOKEN=
 PROSPECTOR_MAPS_ACTOR_ID=compass/crawler-google-places
 NEXT_PUBLIC_APP_URL=http://localhost:3000
 ```
+
+> Variáveis adicionais (modelos de fallback/visão, timeouts da IA e ajuste fino
+> do "digitando") estão documentadas no `.env.example`.
 
 ## Evolution API (WhatsApp)
 
@@ -227,10 +233,21 @@ O seed cria a atendente `Camila` com:
 - pausa de IA ao pedir humano
 - sem invenções e sem tom robótico
 
+## Scripts e validação
+
+```bash
+npm run lint              # ESLint
+npm run build             # Prisma generate + build de produção
+npm run check             # lint + build
+npm run test:ai-safety    # cenários de segurança da IA (sem custo de API)
+npm run test:typing-delay # valida os ranges do "digitando"
+npm run start:local       # app + bridge Baileys juntos (concurrently)
+```
+
 ## Próximos passos sugeridos
 
-1. Adicionar autenticação (User + sessão)
-2. Criar jobs para follow-up automático por cron/queue
-3. Implementar parser robusto de eventos por versão da Evolution
-4. Acrescentar observabilidade (Sentry + métricas)
-5. Incluir testes e2e para webhook e funil de conversão
+1. Criar jobs para follow-up automático por cron/queue
+2. Implementar parser robusto de eventos por versão da Evolution
+3. Acrescentar observabilidade (Sentry + métricas)
+4. Incluir testes e2e para webhook e funil de conversão
+5. Expor o bridge local com URL pública estável (túnel) para envio manual/disparos e status server-side
