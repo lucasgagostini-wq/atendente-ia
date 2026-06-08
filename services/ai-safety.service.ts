@@ -22,6 +22,8 @@ const RECENT_PIX_CONTEXT_PATTERNS = [
   /quer que eu te mande o pix/i,
 ];
 
+const MAX_WHATSAPP_MESSAGE_LENGTH = 180;
+
 type SanitizedResponse = {
   output: string;
   blocked: boolean;
@@ -125,14 +127,9 @@ export function buildExpectedPaymentData(conversationContext?: SafetyContext) {
 
 export function buildPaymentMessageSequence() {
   return [
-    `Claro 😊 pode fazer o PIX por aqui:
-
-Chave PIX: ${PIX_KEY}
-Nome: ${PIX_NAME}
-Banco: ${PIX_BANK}
-
-Vou te mandar a chave separada aqui embaixo também, pra ficar mais fácil de copiar.`,
+    "Perfeito. O Pix é:",
     PIX_KEY,
+    `Nome: ${PIX_NAME} — ${PIX_BANK}`,
     "Depois que fizer o Pix e mandar o comprovante, eu começo por aqui.",
   ];
 }
@@ -168,14 +165,13 @@ export function updateConversationStage(
 
 function hasCommercialCTA(response: string) {
   return [
-    /\?$/,
     /quer que eu/i,
-    /quer começar|quer comecar|quer fazer/i,
-    /posso te passar|posso deixar separado/i,
-    /me manda a foto|manda a foto|me envia/i,
+    /quer começar|quer comecar/i,
+    /posso te passar o pix|posso te passar o pagamento/i,
     /te mando o pix|mandar o pix|te passar o pix|passar o pagamento/i,
     /começar com 1 foto|comecar com 1 foto/i,
-    /confirmar essa restaura/i,
+    /confirmando o pix|confirmar agora|confirmando agora/i,
+    /consigo entregar ainda hoje/i,
   ].some((pattern) => pattern.test(response.trim()));
 }
 
@@ -193,7 +189,7 @@ export function detectConversationStage(context: SafetyContext = {}) {
     /cliente enviou uma foto|foto para restaurar|imagem|photo|image/.test(text);
   const askedPreview = /pr[eé]via|amostra|teste gr[aá]tis|ver antes|antes de pagar/.test(text);
   const askedPrice = /pre[cç]o|valor|quanto|custa|pacote|r\$|pix/.test(text);
-  const askedTrust = /confi[aá]vel|confian[cç]a|golpe|garantia|seguro|medo|receio/.test(text);
+  const askedTrust = /confi[aá]vel|confian[cç]a|golpe|garantia|seguro|medo|receio|cara de ia|artificial/.test(text);
 
   if (askedPreview) return "preview_requested";
   if (askedPrice) return "price_requested";
@@ -203,10 +199,17 @@ export function detectConversationStage(context: SafetyContext = {}) {
 }
 
 export function detectObjectionType(context: SafetyContext = {}) {
-  const text = compactText(context);
+  const incomingText = normalize(context.incomingText).toLowerCase();
+  const text = incomingText || compactText(context);
 
   if (/pr[eé]via|amostra|teste gr[aá]tis|ver antes|antes de pagar|depois eu pago|faz antes/.test(text)) {
     return "preview";
+  }
+  if (/cara de ia|cara de i\.a|artificial|estranh[ao]|deformar|deformad/.test(text)) {
+    return "ai_look_fear";
+  }
+  if (/j[aá] aconteceu.*n[aã]o gostar|algu[eé]m.*n[aã]o gostar|cliente.*n[aã]o gostou|pessoa.*n[aã]o gostou/.test(text)) {
+    return "past_result_question";
   }
   if (/e se .*ruim|se ficar ruim|n[aã]o gostar|ficar ruim|resultado ruim/.test(text)) {
     return "result_fear";
@@ -214,7 +217,7 @@ export function detectObjectionType(context: SafetyContext = {}) {
   if (/n[aã]o confio|confi[aá]vel|confian[cç]a|golpe|garantia|seguro|medo|receio/.test(text)) {
     return "trust";
   }
-  if (/t[aá] caro|caro|desconto|barato|menor valor/.test(text)) {
+  if (/t[aá] caro|caro|desconto|barato|menor valor|concorrente|por 5|5 reais|r\$\s*5/.test(text)) {
     return "price_resistance";
   }
   if (/vou pensar|depois eu vejo|mais tarde|amanh[aã]|qualquer coisa|te chamo/.test(text)) {
@@ -278,29 +281,31 @@ function ctaForContext(context: SafetyContext = {}) {
     return "Me manda a foto aqui que eu vejo pra você.";
   }
   if (instruction.objectionType === "preview") {
-    return "Quer começar com 1 foto por R$ 9,99?";
+    return "Essa fica só R$10 pra testar. Quer que eu te mande o Pix?";
   }
   if (instruction.objectionType === "price") {
-    return "Quer que eu te mande o PIX?";
+    return "Pra fazer essa, fica R$10. Quer que eu te mande o Pix?";
   }
   if (
     instruction.objectionType === "trust" ||
     instruction.objectionType === "result_fear" ||
+    instruction.objectionType === "ai_look_fear" ||
+    instruction.objectionType === "past_result_question" ||
     instruction.objectionType === "price_resistance"
   ) {
-    return "Pode começar com 1 foto só. Quer que eu te mande o PIX?";
+    return "Pode começar com 1 foto por R$10. Quer que eu te mande o Pix?";
   }
   if (instruction.objectionType === "delay") {
-    return "Se quiser começar com 1 foto, fica R$ 9,99. Posso te mandar o PIX?";
+    return "Confirmando o Pix, eu já separo essa foto pra fazer hoje. Quer que eu te mande o Pix?";
   }
   if (instruction.emotionalContext !== "none") {
-    return "Posso seguir com essa foto por R$10. Quer que eu te mande o PIX?";
+    return "Pra fazer essa foto fica R$10. Quer que eu te mande o Pix?";
   }
   if (instruction.hasPhoto && !instruction.hasPrice) {
-    return "Essa fica R$10. Quer que eu te mande o PIX?";
+    return "Pra fazer essa, fica R$10. Quer que eu te mande o Pix?";
   }
 
-  return "Quer que eu te mande o PIX?";
+  return "Quer que eu te mande o Pix?";
 }
 
 function normalizeForComparison(value: string) {
@@ -338,6 +343,92 @@ function normalizePrePaymentPromises(response: string, context: SafetyContext = 
   return output;
 }
 
+function removeOpenEndedAdjustmentPromises(response: string) {
+  return response
+    .replace(/(?:at[eé] ficar satisfeito|ajusto quantas vezes precisar|a gente corrige at[eé] ficar do seu jeito|qualquer coisa depois voc[eê] me avisa)[^.!?]*[.!?]?/gi, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
+function removePassiveClosers(response: string) {
+  return response
+    .replace(/(?:me avisa|quando quiser|se quiser|fica [aà] vontade|me chama|qualquer coisa me chama)[^.!?]*[.!?]?/gi, "")
+    .replace(/posso seguir\?/gi, "Quer que eu te mande o Pix?")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+}
+
+function asksForPhotoAgain(response: string) {
+  return /me manda a foto|manda a foto|envia a foto|me envia a foto|manda aqui que eu vejo|envia aqui que eu vejo|pode mandar a foto|mande a foto/i.test(response);
+}
+
+function responseAsksQuantity(response: string) {
+  return /quantas fotos|quantas voc[eê] gostaria|quantas quer|mais de uma foto|pacote maior/i.test(response);
+}
+
+function commercialReplyForSpecificPhoto(context: SafetyContext = {}) {
+  const emotionalContext = detectEmotionalContext(context);
+
+  if (emotionalContext === "grandparent") {
+    return [
+      "Recebi a foto. Que lembrança especial da sua avó ❤️",
+      "Dá pra trabalhar nela com cuidado, mantendo o rosto natural e sem deixar artificial.",
+      "Pra fazer essa foto fica R$10. Quer que eu te mande o Pix?",
+    ].join("\n\n");
+  }
+
+  if (emotionalContext === "loss" || emotionalContext === "family" || emotionalContext === "memory") {
+    return [
+      "Recebi a foto. É uma lembrança muito especial.",
+      "Dá pra trabalhar nela com cuidado, mantendo o rosto natural e sem deixar artificial.",
+      "Pra fazer essa foto fica R$10. Quer que eu te mande o Pix?",
+    ].join("\n\n");
+  }
+
+  return [
+    "Recebi a foto. Dá pra trabalhar nela sim.",
+    "O foco é melhorar com cuidado e manter o rosto natural.",
+    "Pra fazer essa foto fica R$10. Quer que eu te mande o Pix?",
+  ].join("\n\n");
+}
+
+function guardrailReplyForObjection(context: SafetyContext = {}) {
+  const objectionType = detectObjectionType(context);
+  const emotionalContext = detectEmotionalContext(context);
+
+  if (objectionType === "preview") {
+    return [
+      "Entendo sua preocupação. A gente não faz prévia grátis porque o trabalho já começa na restauração da foto.",
+      "Mas essa fica só R$10 pra testar, com cuidado pra manter o rosto natural. Quer que eu te mande o Pix?",
+    ].join("\n\n");
+  }
+
+  if (objectionType === "ai_look_fear") {
+    return [
+      "Entendo total. O foco aqui é justamente não deixar com cara artificial nem mudar o rosto.",
+      "Eu trabalho pra melhorar a nitidez e recuperar a foto com naturalidade. Pra essa fica R$10. Quer que eu te mande o Pix?",
+    ].join("\n\n");
+  }
+
+  if (objectionType === "past_result_question") {
+    return [
+      "É bem raro, porque o foco é restaurar sem mudar o rosto nem exagerar no efeito.",
+      "E se precisar de algum ajuste simples depois, eu corrijo dentro do pedido. Confirmando agora, consigo entregar ainda hoje.",
+    ].join("\n\n");
+  }
+
+  if (objectionType === "price_resistance") {
+    const subject = emotionalContext === "grandparent" ? "foto da sua avó" : "foto";
+
+    return [
+      "Entendo. Tem gente que faz mais barato mesmo, mas aqui eu prefiro fazer com cuidado pra não deformar o rosto nem deixar artificial.",
+      `Pra essa ${subject} fica R$10 e consigo entregar ainda hoje. Quer que eu te mande o Pix?`,
+    ].join("\n\n");
+  }
+
+  return null;
+}
+
 function dedupeRepeatedLines(lines: string[]) {
   const unique: string[] = [];
 
@@ -366,38 +457,36 @@ export function normalizeCommercialResponse(response: string, context: SafetyCon
   let output = normalize(response);
   if (!output) return output;
 
-  const emotionalContext = detectEmotionalContext(context);
   const singlePhotoContext = isSpecificSinglePhotoContext(context);
   const askedPrice = detectObjectionType(context) === "price" || hasPriceInContext(context);
+  const forcedObjectionReply = guardrailReplyForObjection(context);
 
-  if (singlePhotoContext && askedPrice && emotionalContext === "grandparent") {
-    return [
-      "Recebi a foto. Que lembrança especial da sua avó ❤️",
-      "Dá pra trabalhar nela sim. A ideia é melhorar com cuidado, mantendo o rosto natural e sem deixar artificial.",
-      "Pra fazer essa foto fica R$10. Quer que eu te mande o Pix?",
-    ].join("\n\n");
+  if (forcedObjectionReply) {
+    return forcedObjectionReply;
   }
 
   if (singlePhotoContext && askedPrice) {
-    return [
-      "Recebi a foto. Dá pra trabalhar nela sim.",
-      "A ideia é melhorar com cuidado e manter o rosto natural.",
-      "Pra fazer essa foto fica R$10. Quer que eu te mande o Pix?",
-    ].join("\n\n");
+    return commercialReplyForSpecificPhoto(context);
   }
 
   if (
     hasSinglePhotoSignal(context) &&
-    /quantas fotos|quantas voce gostaria|quantas você gostaria|mais de uma foto|quer que eu j[aá] comece/i.test(output)
+    (responseAsksQuantity(output) || asksForPhotoAgain(output) || /quer que eu j[aá] comece/i.test(output))
   ) {
-    return [
-      "Recebi a foto. Dá pra trabalhar nela sim.",
-      "A ideia é melhorar com cuidado e manter o rosto natural.",
-      "Pra fazer essa foto fica R$10. Quer que eu te mande o Pix?",
-    ].join("\n\n");
+    return commercialReplyForSpecificPhoto(context);
+  }
+
+  if (hasPhotoInContext(context) && asksForPhotoAgain(output)) {
+    output = "Recebi a foto. Dá pra trabalhar nela com cuidado, mantendo o rosto natural. Pra fazer essa fica R$10. Quer que eu te mande o Pix?";
+  }
+
+  if (singlePhotoContext && responseAsksQuantity(output)) {
+    output = commercialReplyForSpecificPhoto(context);
   }
 
   output = normalizePrePaymentPromises(output, context);
+  output = removeOpenEndedAdjustmentPromises(output);
+  output = removePassiveClosers(output);
 
   const lines = output
     .split(/\n+/)
@@ -426,10 +515,62 @@ export function splitResponseIntoWhatsAppMessages(response: string) {
     .filter(Boolean),
   );
 
-  if (parts.length <= 1) return [response.trim()].filter(Boolean);
-  if (parts.length <= 3) return parts;
+  const shortParts = parts.flatMap((part) => splitLongMessagePart(part));
 
-  return [parts[0], parts[1], parts.slice(2).join("\n\n")].filter(Boolean).slice(0, 3);
+  if (shortParts.length <= 1) return shortParts.filter(Boolean);
+  if (shortParts.length <= 3) return shortParts;
+
+  return shortParts.slice(0, 3).filter(Boolean);
+}
+
+function splitLongMessagePart(part: string) {
+  const output = normalize(part);
+  if (!output) return [];
+  if (output.length <= MAX_WHATSAPP_MESSAGE_LENGTH) return [output];
+
+  const sentences = output
+    .split(/(?<=[.!?])\s+/)
+    .map((sentence) => sentence.trim())
+    .filter(Boolean);
+
+  const chunks: string[] = [];
+  let current = "";
+
+  for (const sentence of sentences.length > 0 ? sentences : [output]) {
+    if (sentence.length > MAX_WHATSAPP_MESSAGE_LENGTH) {
+      if (current) {
+        chunks.push(current);
+        current = "";
+      }
+
+      const words = sentence.split(/\s+/);
+      let wordChunk = "";
+
+      for (const word of words) {
+        const next = wordChunk ? `${wordChunk} ${word}` : word;
+        if (next.length > MAX_WHATSAPP_MESSAGE_LENGTH) {
+          if (wordChunk) chunks.push(wordChunk);
+          wordChunk = word;
+        } else {
+          wordChunk = next;
+        }
+      }
+
+      if (wordChunk) chunks.push(wordChunk);
+      continue;
+    }
+
+    const next = current ? `${current} ${sentence}` : sentence;
+    if (next.length > MAX_WHATSAPP_MESSAGE_LENGTH) {
+      if (current) chunks.push(current);
+      current = sentence;
+    } else {
+      current = next;
+    }
+  }
+
+  if (current) chunks.push(current);
+  return chunks;
 }
 
 export function safeFallbackForStage(stage: string) {
@@ -437,11 +578,11 @@ export function safeFallbackForStage(stage: string) {
     case "photo_received":
       return "Recebi sim. Vou verificar com cuidado e já te falo o melhor caminho.";
     case "price_requested":
-      return "Faço a restauração por pacote. A opção de 1 foto fica R$ 9,99, e também tenho pacotes para mais fotos. Quer que eu te mande as opções?";
+      return "Pra fazer 1 foto fica R$10. Quer que eu te mande o Pix?";
     case "preview_requested":
-      return "Entendo seu receio 🥺 mas como cada restauração leva tempo e é feita com cuidado, eu começo somente após a confirmação do pagamento.";
+      return "Entendo sua preocupação. A gente não faz prévia grátis porque o trabalho já começa na restauração da foto.";
     case "trust_requested":
-      return "Entendo totalmente. Pode começar com 1 foto só, que fica R$ 9,99, e eu vou te acompanhando por aqui.";
+      return "Entendo total. O foco é melhorar com cuidado, sem mudar o rosto. Pra essa fica R$10. Quer que eu te mande o Pix?";
     case "needs_photo":
     default:
       return "Consigo te ajudar sim 😊 me manda a foto que você quer restaurar aqui.";
@@ -504,7 +645,7 @@ export function validatePromptMaster(prompt: Prompt) {
 
   if (!/camila|atendente/.test(combined)) missing.push("nome da atendente");
   if (!/restaura/.test(combined)) missing.push("oferta");
-  if (!/9,99|r\$\s*9/.test(combined)) missing.push("preço");
+  if (!/9,99|r\$\s*9|r\$\s*10|\b10\b/.test(combined)) missing.push("preço");
   if (!/pr[eé]via|amostra|teste/.test(combined) || !/pagamento|pix/.test(combined)) {
     missing.push("regra de não fazer prévia");
   }
