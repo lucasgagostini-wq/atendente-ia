@@ -108,7 +108,7 @@ export default function DashboardPage() {
 
   // Setup checklist
   const setupItems = [
-    { label: "WhatsApp conectado",   done: whatsappOk, href: "/configuracoes", icon: WhatsappLogo },
+    { label: "WhatsApp conectado",   done: whatsappOk, href: "/configuracoes", icon: WhatsappLogo, hint: whatsappOk ? "Pronto" : "npm run bridge" },
     { label: "IA configurada",       done: aiOk,       href: "/configuracoes", icon: Brain },
     { label: "Webhook ativo",        done: webhookOk,  href: "/configuracoes", icon: Lightning },
     { label: "Prompt personalizado", done: leads.length > 0 || !loading, href: "/prompt", icon: Robot },
@@ -319,7 +319,9 @@ export default function DashboardPage() {
                       <p className={`truncate text-xs font-medium ${item.done ? "text-zinc-300" : "text-zinc-500"}`}>
                         {item.label}
                       </p>
-                      <p className="text-[10px] text-zinc-600">{item.done ? "Pronto" : "Configurar →"}</p>
+                      <p className="text-[10px] text-zinc-600">
+                        {item.done ? "Pronto" : ((item as { hint?: string }).hint ?? "Configurar →")}
+                      </p>
                     </div>
                   </Link>
                 );
