@@ -20,7 +20,11 @@
     "start:local": "concurrently --names \"APP,WHATSAPP\" --prefix-colors \"cyan,green\" \"npm run dev\" \"npm run bridge:baileys\"",
     "whatsapp": "node scripts/start-whatsapp.mjs",
     "ai:check": "tsx scripts/ai-check.ts",
-    "test:webhook-logic": "tsx scripts/test-webhook-logic.ts"
+    "test:webhook-logic": "tsx scripts/test-webhook-logic.ts",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:public": "playwright test --project=smoke-public",
+    "setup:e2e-user": "tsx scripts/setup-e2e-user.ts"
   },
   "dependencies": {
     "@hapi/boom": "^10.0.1",
@@ -50,6 +54,7 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@playwright/test": "^1.60.0",
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",
