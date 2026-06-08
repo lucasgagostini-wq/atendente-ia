@@ -1,6 +1,5 @@
 "use client";
 
-import { motion } from "framer-motion";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 type Props = {
@@ -13,6 +12,14 @@ export function MessagesChart({ series }: Props) {
 
   return (
     <Card>
+      {/* CSS keyframe — inlined once per component mount; no runtime dep */}
+      <style>{`
+        @keyframes barGrow {
+          from { transform: scaleY(0); }
+          to   { transform: scaleY(1); }
+        }
+      `}</style>
+
       <CardHeader className="flex flex-row items-center justify-between pb-4">
         <div>
           <CardTitle className="text-sm font-semibold text-zinc-200">Volume de mensagens</CardTitle>
@@ -41,13 +48,14 @@ export function MessagesChart({ series }: Props) {
                   </div>
                 </div>
 
-                {/* Bar */}
+                {/* Bar — CSS animation replaces framer-motion (saves ~152 kB chunk) */}
                 <div className="flex w-full flex-1 items-end">
-                  <motion.div
-                    initial={{ scaleY: 0 }}
-                    animate={{ scaleY: 1 }}
-                    transition={{ duration: 0.5, delay: i * 0.05, ease: [0.4, 0, 0.2, 1] }}
-                    style={{ height: `${Math.max(heightPct, 4)}%`, transformOrigin: "bottom" }}
+                  <div
+                    style={{
+                      height: `${Math.max(heightPct, 4)}%`,
+                      transformOrigin: "bottom",
+                      animation: `barGrow 0.5s cubic-bezier(0.4,0,0.2,1) ${i * 50}ms both`,
+                    }}
                     className={`w-full rounded-t-md ${
                       isLast
                         ? "bg-indigo-500"
