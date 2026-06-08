@@ -45,7 +45,7 @@ export function StatusBadge({ status, showDot = true, className }: Props) {
         className,
       )}
     >
-      {showDot && <span className={cn("size-1.5 rounded-full", config.dot)} />}
+      {showDot && <span aria-hidden="true" className={cn("size-1.5 rounded-full", config.dot)} />}
       {config.label}
     </span>
   );

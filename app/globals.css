@@ -152,6 +152,19 @@ body {
   .ambient-aura-1,
   .ambient-aura-2,
   .ambient-aura-3 { animation: none; }
+
+  /* Desativa animações não-essenciais para usuários com preferência de movimento reduzido */
+  .typing-dot,
+  .status-pulse,
+  .animate-fade-in-up,
+  .skeleton {
+    animation: none;
+  }
+
+  /* Mantém skeletons visíveis mesmo sem animação */
+  .skeleton {
+    background: rgba(39, 39, 42, 0.5);
+  }
 }
 
 /* ─── Fade-in animation ─────────────────────────── */

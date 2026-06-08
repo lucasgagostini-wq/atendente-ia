@@ -14,7 +14,10 @@ export function Select({ className, options, ...props }: SelectProps) {
   return (
     <select
       className={cn(
-        "h-10 w-full rounded-md border border-zinc-700 bg-zinc-900 px-3 text-sm text-zinc-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-blue-400",
+        "h-9 w-full cursor-pointer rounded-lg border border-zinc-700/80 bg-zinc-900/80 px-3 text-sm text-zinc-100 transition-colors",
+        "hover:border-zinc-600",
+        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/40 focus-visible:border-indigo-500/50",
+        "disabled:cursor-not-allowed disabled:opacity-50",
         className,
       )}
       {...props}
