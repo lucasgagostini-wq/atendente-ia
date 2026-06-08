@@ -123,6 +123,14 @@ class PaymentReceiptService {
     }
 
     const startedAt = Date.now();
+
+    // OpenRouter (e Claude Vision) exige que base64 tenha o prefixo data URI.
+    // URLs HTTP/S já funcionam como estão.
+    const imageContent =
+      imageUrlOrBase64.startsWith("http") || imageUrlOrBase64.startsWith("data:")
+        ? imageUrlOrBase64
+        : `data:image/jpeg;base64,${imageUrlOrBase64}`;
+
     const prompt = [
       "Analise a imagem como possível comprovante PIX brasileiro.",
       "Não confirme pagamento. Apenas extraia sinais visuais e compare com os dados esperados.",
@@ -148,7 +156,7 @@ class PaymentReceiptService {
               role: "user",
               content: [
                 { type: "text", text: prompt },
-                { type: "image_url", image_url: { url: imageUrlOrBase64 } },
+                { type: "image_url", image_url: { url: imageContent } },
               ],
             },
           ],
