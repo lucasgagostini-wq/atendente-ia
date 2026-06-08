@@ -14,6 +14,7 @@ import {
   detectPaymentReceipt,
   ensureSalesCTA,
   hasRecentPixContext,
+  normalizeCommercialResponse,
   safeFallbackForStage,
   sanitizeAIResponse,
   sendPixAsSeparateMessage,
@@ -149,7 +150,7 @@ const emotionalClose = ensureSalesCTA("Foto de vó tem um valor enorme mesmo �
   incomingText: "foto antiga da minha avó",
   recentHistory: ["Lead: Cliente enviou uma foto para restaurar."],
 });
-assert.match(emotionalClose, /Quer que eu já comece essa foto pra você\?/);
+assert.match(emotionalClose, /Posso seguir com essa foto por R\$10\. Quer que eu te mande o PIX\?/);
 
 const splitMessages = splitResponseIntoWhatsAppMessages(
   "Entendo seu receio 🥺 eu começo depois da confirmação.\n\nA de 1 foto fica R$ 9,99. Quer que eu te mande o PIX?",
@@ -171,7 +172,7 @@ Vou te mandar a chave separada aqui embaixo também, pra ficar mais fácil de co
 assert.equal(pixMessages[1], "estudiofotos000@gmail.com");
 assert.equal(
   pixMessages[2],
-  "Depois que fizer, me manda o comprovante aqui mesmo que eu já inicio a restauração pra você.",
+  "Depois que fizer o Pix e mandar o comprovante, eu começo por aqui.",
 );
 assert.equal(detectPaymentIntent({ incomingText: "manda o pix" }), true);
 assert.equal(detectPaymentIntent({ incomingText: "como faço pra pagar?" }), true);
@@ -257,5 +258,42 @@ const restorationPhotoReply = ensureSalesCTA(
 );
 assert.doesNotMatch(restorationPhotoReply, /comprovante/i);
 assert.match(restorationPhotoReply, /\?$/);
+
+const normalizedPrePayment = normalizeCommercialResponse(
+  "Perfeito, já começo essa foto pra você agora.",
+  {
+    incomingText: "quanto fica essa foto?",
+    recentHistory: ["Lead: [Cliente enviou uma foto para restaurar]"],
+    hasPhoto: true,
+  },
+);
+assert.match(normalizedPrePayment, /Depois que fizer o Pix e mandar o comprovante, eu começo por aqui/i);
+
+const normalizedSinglePhoto = normalizeCommercialResponse(
+  "Recebi a foto, obrigada! Quantas fotos você gostaria de restaurar hoje?\n\nQuer que eu já comece essa foto pra você?",
+  {
+    incomingText:
+      "[Cliente enviou uma foto para restaurar]\nEssa foto é da minha avó que faleceu. Quero que fique bonita, mas sem mudar muito o rosto.\nQuanto fica pra fazer essa?",
+    recentHistory: ["Lead: oi, queria restaurar uma foto antiga. Como funciona?"],
+    hasPhoto: true,
+  },
+);
+assert.equal(
+  normalizedSinglePhoto,
+  "Recebi a foto. Dá pra trabalhar nela sim. A ideia é melhorar com cuidado e manter o rosto natural. Essa fica R$10. Quer que eu te mande o Pix?",
+);
+
+const dedupedMessages = splitResponseIntoWhatsAppMessages(
+  normalizeCommercialResponse(
+    "Entendo, essa foto deve ter um valor enorme pra você.\n\nQuer que eu te mande o PIX?\n\nQuer que eu te mande o PIX?",
+    {
+      incomingText: "essa foto é da minha avó",
+      recentHistory: ["Lead: [Cliente enviou uma foto para restaurar]"],
+      hasPhoto: true,
+    },
+  ),
+);
+assert.equal(dedupedMessages.length, 2);
+assert.equal(dedupedMessages[1], "Quer que eu te mande o PIX?");
 
 console.log("AI safety scenarios OK");

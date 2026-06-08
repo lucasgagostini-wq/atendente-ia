@@ -133,7 +133,7 @@ Banco: ${PIX_BANK}
 
 Vou te mandar a chave separada aqui embaixo também, pra ficar mais fácil de copiar.`,
     PIX_KEY,
-    "Depois que fizer, me manda o comprovante aqui mesmo que eu já inicio a restauração pra você.",
+    "Depois que fizer o Pix e mandar o comprovante, eu começo por aqui.",
   ];
 }
 
@@ -146,7 +146,7 @@ export function ensureReceiptRequest(messages: string[]) {
 
   return [
     ...messages,
-    "Depois que fizer, me manda o comprovante aqui mesmo que eu já inicio a restauração pra você.",
+    "Depois que fizer o Pix e mandar o comprovante, eu começo por aqui.",
   ];
 }
 
@@ -285,13 +285,96 @@ function ctaForContext(context: SafetyContext = {}) {
     return "Se quiser começar com 1 foto, fica R$ 9,99. Posso te mandar o PIX?";
   }
   if (instruction.emotionalContext !== "none") {
-    return "Quer que eu já comece essa foto pra você?";
+    return "Posso seguir com essa foto por R$10. Quer que eu te mande o PIX?";
   }
   if (instruction.hasPhoto && !instruction.hasPrice) {
-    return "A de 1 foto fica R$ 9,99. Quer que eu te mande o PIX?";
+    return "Essa fica R$10. Quer que eu te mande o PIX?";
   }
 
   return "Quer que eu te mande o PIX?";
+}
+
+function normalizeForComparison(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function hasSinglePhotoSignal(context: SafetyContext = {}) {
+  const text = compactText(context);
+  return (
+    Boolean(context.hasPhoto) &&
+    !/fotos|mais de uma|varias|várias|pacote|quantas/.test(text) &&
+    (/essa foto|essa da minha|essa e|quero que fique|sem mudar muito o rosto|foto antiga/.test(text) ||
+      detectEmotionalContext(context) !== "none")
+  );
+}
+
+function normalizePrePaymentPromises(response: string, context: SafetyContext = {}) {
+  const output = normalize(response);
+  if (!output) return output;
+
+  if (hasRecentPixContext(context)) {
+    return output;
+  }
+
+  if (/j[aá]\s+come[cç]|vou come[cç]ar|vou iniciar|j[aá]\s+inicio|inicio a restaura[cç][aã]o|comeco por aqui/i.test(output)) {
+    return output.replace(
+      /(?:j[aá]\s+come[cç][^.!?]*|vou come[cç]ar[^.!?]*|vou iniciar[^.!?]*|j[aá]\s+inicio[^.!?]*|inicio a restaura[cç][aã]o[^.!?]*|comeco por aqui[^.!?]*)/gi,
+      "Depois que fizer o Pix e mandar o comprovante, eu começo por aqui",
+    );
+  }
+
+  return output;
+}
+
+function dedupeRepeatedLines(lines: string[]) {
+  const unique: string[] = [];
+
+  for (const line of lines) {
+    const normalized = normalizeForComparison(line);
+    if (!normalized) continue;
+
+    const alreadyIncluded = unique.some((item) => {
+      const normalizedItem = normalizeForComparison(item);
+      return (
+        normalizedItem === normalized ||
+        normalizedItem.includes(normalized) ||
+        normalized.includes(normalizedItem)
+      );
+    });
+
+    if (!alreadyIncluded) {
+      unique.push(line.trim());
+    }
+  }
+
+  return unique;
+}
+
+export function normalizeCommercialResponse(response: string, context: SafetyContext = {}) {
+  let output = normalize(response);
+  if (!output) return output;
+
+  if (
+    hasSinglePhotoSignal(context) &&
+    /quantas fotos|quantas voce gostaria|quantas você gostaria|mais de uma foto|quer que eu j[aá] comece/i.test(output)
+  ) {
+    return "Recebi a foto. Dá pra trabalhar nela sim. A ideia é melhorar com cuidado e manter o rosto natural. Essa fica R$10. Quer que eu te mande o Pix?";
+  }
+
+  output = normalizePrePaymentPromises(output, context);
+
+  const lines = output
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const dedupedLines = dedupeRepeatedLines(lines);
+
+  return dedupedLines.join("\n\n");
 }
 
 export function ensureSalesCTA(response: string, context: SafetyContext = {}) {
@@ -305,10 +388,12 @@ export function ensureSalesCTA(response: string, context: SafetyContext = {}) {
 }
 
 export function splitResponseIntoWhatsAppMessages(response: string) {
-  const parts = response
+  const parts = dedupeRepeatedLines(
+    response
     .split(/\n{2,}/)
     .map((part) => part.trim())
-    .filter(Boolean);
+    .filter(Boolean),
+  );
 
   if (parts.length <= 1) return [response.trim()].filter(Boolean);
 

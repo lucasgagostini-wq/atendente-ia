@@ -5,6 +5,7 @@ import { openRouterService } from "@/services/openrouter.service";
 import { promptService } from "@/services/prompt.service";
 import {
   ensureSalesCTA,
+  normalizeCommercialResponse,
   sanitizeAIResponse,
   splitResponseIntoWhatsAppMessages,
   validatePromptMaster,
@@ -79,7 +80,11 @@ export async function POST(request: Request) {
       incomingText: parsed.data.incomingMessage,
       recentHistory,
     });
-    const commercialResponse = ensureSalesCTA(safeResponse.output, {
+    const commercialDraft = ensureSalesCTA(safeResponse.output, {
+      incomingText: parsed.data.incomingMessage,
+      recentHistory,
+    });
+    const commercialResponse = normalizeCommercialResponse(commercialDraft, {
       incomingText: parsed.data.incomingMessage,
       recentHistory,
     });

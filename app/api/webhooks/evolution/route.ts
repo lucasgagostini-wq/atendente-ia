@@ -25,6 +25,7 @@ import {
   detectIfWaitingPaymentReceipt,
   ensureSalesCTA,
   hasRecentPixContext,
+  normalizeCommercialResponse,
   safeFallbackForStage,
   sanitizeAIResponse,
   sendPixAsSeparateMessage,
@@ -53,6 +54,13 @@ type IncomingPayload = {
   replyTransport?: "baileys_bridge" | "evolution";
   senderName?: string;
   metadata?: Prisma.InputJsonValue;
+};
+
+type PendingInboundMessage = {
+  id: string;
+  content: string;
+  type: "TEXT" | "IMAGE" | "AUDIO";
+  createdAt: Date;
 };
 
 // ── Helpers ────────────────────────────────────────────────────
@@ -293,7 +301,7 @@ function receiptDecisionFromAnalysis(analysis: PixReceiptAnalysis): {
     return {
       stage: PAYMENT_STAGE_WAITING_RECEIPT,
       message:
-        "Recebi a imagem, mas não consegui identificar como comprovante do PIX. Pode me mandar o comprovante do pagamento, por favor?",
+        "Recebi a imagem, mas não consegui identificar como comprovante do PIX. Pode me mandar o comprovante com valor, data e recebedor visíveis, por favor?",
       alert: "Lead enviou imagem que não parece comprovante.",
       kind: "random_or_unrelated",
     };
@@ -309,7 +317,7 @@ function receiptDecisionFromAnalysis(analysis: PixReceiptAnalysis): {
     return {
       stage: PAYMENT_STAGE_RECEIPT_SENT,
       message:
-        "Recebi sim 😊 vou conferir aqui e já começo a restauração da sua foto com todo carinho.",
+        "Recebi sim 😊 vou conferir aqui e, estando certinho, sigo por aqui com você.",
       alert: "Comprovante recebido e parece coerente. Conferir pagamento manualmente.",
       kind: "coherent",
     };
@@ -415,6 +423,112 @@ function buildAiIncomingText(incoming: IncomingPayload, hasRecentPixInHistory: b
   }
 
   return `${imageContextNote}\n${normalizedText}`;
+}
+
+function dedupeBatchParts(parts: string[]) {
+  const seen = new Set<string>();
+  const output: string[] = [];
+
+  for (const part of parts) {
+    const normalized = part.trim().toLowerCase();
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    output.push(part.trim());
+  }
+
+  return output;
+}
+
+function buildAiIncomingTextFromBatch(
+  inboundMessages: PendingInboundMessage[],
+  hasRecentPixInHistory: boolean,
+) {
+  const parts = inboundMessages.flatMap((message) => {
+    if (message.type === "IMAGE") {
+      return [buildAiIncomingText(
+        {
+          phone: "",
+          text: message.content,
+          messageId: message.id,
+          type: "IMAGE",
+        },
+        hasRecentPixInHistory,
+      )];
+    }
+
+    return [message.content.trim()];
+  });
+
+  return dedupeBatchParts(parts).join("\n");
+}
+
+async function getPendingInboundBatch(args: {
+  conversationId: string;
+  leadId: string;
+  currentInboundId: string;
+  currentInboundCreatedAt: Date;
+}) {
+  const newerOutboundMessage = await prisma.message.findFirst({
+    where: {
+      conversationId: args.conversationId,
+      leadId: args.leadId,
+      direction: "OUTBOUND",
+      createdAt: { gt: args.currentInboundCreatedAt },
+    },
+    select: { id: true },
+  });
+
+  if (newerOutboundMessage) {
+    return {
+      skip: true,
+      reason: "newer_outbound_already_sent",
+      messages: [] as PendingInboundMessage[],
+    };
+  }
+
+  const lastOutboundBeforeCurrent = await prisma.message.findFirst({
+    where: {
+      conversationId: args.conversationId,
+      leadId: args.leadId,
+      direction: "OUTBOUND",
+      createdAt: { lte: args.currentInboundCreatedAt },
+    },
+    orderBy: { createdAt: "desc" },
+    select: { createdAt: true },
+  });
+
+  const pendingMessages = await prisma.message.findMany({
+    where: {
+      conversationId: args.conversationId,
+      leadId: args.leadId,
+      direction: "INBOUND",
+      createdAt: {
+        gt: lastOutboundBeforeCurrent?.createdAt ?? new Date(0),
+      },
+    },
+    orderBy: { createdAt: "asc" },
+    select: {
+      id: true,
+      content: true,
+      type: true,
+      createdAt: true,
+    },
+  });
+
+  const latestPendingMessage = pendingMessages.at(-1);
+  if (!latestPendingMessage || latestPendingMessage.id !== args.currentInboundId) {
+    return {
+      skip: true,
+      reason: "newer_message_in_same_batch",
+      messages: pendingMessages as PendingInboundMessage[],
+    };
+  }
+
+  return {
+    skip: false,
+    reason: null,
+    messages: pendingMessages as PendingInboundMessage[],
+  };
 }
 
 // ── Handler ────────────────────────────────────────────────────
@@ -547,28 +661,26 @@ export async function POST(request: Request) {
     if (INCOMING_MESSAGE_DEBOUNCE_MS > 0) {
       await sleep(INCOMING_MESSAGE_DEBOUNCE_MS);
 
-      const newerInboundMessage = await prisma.message.findFirst({
-        where: {
-          conversationId: conversation.id,
-          leadId: lead.id,
-          direction: "INBOUND",
-          createdAt: { gt: inboundMessage.createdAt },
-        },
-        select: { id: true, createdAt: true },
-        orderBy: { createdAt: "desc" },
+      const pendingBatch = await getPendingInboundBatch({
+        conversationId: conversation.id,
+        leadId: lead.id,
+        currentInboundId: inboundMessage.id,
+        currentInboundCreatedAt: inboundMessage.createdAt,
       });
 
-      if (newerInboundMessage) {
+      if (pendingBatch.skip) {
         await prisma.log.create({
           data: {
             type: "WHATSAPP_MESSAGE_DEBOUNCED",
-            message: "Resposta adiada porque chegaram mensagens mais novas do mesmo lead",
+            message: "Resposta adiada para consolidar mensagens do mesmo lead",
             payload: {
               leadId: lead.id,
               conversationId: conversation.id,
               messageId: inboundMessage.id,
-              newerMessageId: newerInboundMessage.id,
+              batchSize: pendingBatch.messages.length,
+              latestBatchMessageId: pendingBatch.messages.at(-1)?.id ?? null,
               debounceMs: INCOMING_MESSAGE_DEBOUNCE_MS,
+              reason: pendingBatch.reason,
             },
           },
         });
@@ -576,20 +688,44 @@ export async function POST(request: Request) {
         return NextResponse.json({
           ok: true,
           debounced: true,
-          reason: "newer_message_received",
+          reason: pendingBatch.reason,
         });
       }
     }
 
-    const isWaitingReceipt = detectIfWaitingPaymentReceipt(lead.summary);
     const recentHistory = await conversationService.getRecentHistory(conversation.id, 10);
+    const pendingBatch = await getPendingInboundBatch({
+      conversationId: conversation.id,
+      leadId: lead.id,
+      currentInboundId: inboundMessage.id,
+      currentInboundCreatedAt: inboundMessage.createdAt,
+    });
+    const batchedInboundMessages =
+      pendingBatch.skip || pendingBatch.messages.length === 0
+        ? [{
+            id: inboundMessage.id,
+            content: incoming.text,
+            type: incoming.type,
+            createdAt: inboundMessage.createdAt,
+          } satisfies PendingInboundMessage]
+        : pendingBatch.messages;
+    const batchHasPhoto = batchedInboundMessages.some((message) => message.type === "IMAGE");
+    const batchedIncomingText = buildAiIncomingTextFromBatch(
+      batchedInboundMessages,
+      hasRecentPixContext({
+        incomingText: incoming.text,
+        recentHistory,
+        hasPhoto: batchHasPhoto,
+      }),
+    );
+    const isWaitingReceipt = detectIfWaitingPaymentReceipt(lead.summary);
     const hasRecentPixInHistory = hasRecentPixContext({
-      incomingText: incoming.text,
+      incomingText: batchedIncomingText,
       recentHistory,
-      hasPhoto: incoming.type === "IMAGE",
+      hasPhoto: batchHasPhoto,
     });
 
-    if (isWaitingReceipt && incoming.type === "IMAGE" && !hasRecentPixInHistory) {
+    if (isWaitingReceipt && batchHasPhoto && !hasRecentPixInHistory) {
       await prisma.log.create({
         data: {
           type: "PAYMENT_RECEIPT_SKIPPED",
@@ -608,9 +744,9 @@ export async function POST(request: Request) {
       isWaitingReceipt &&
       hasRecentPixInHistory &&
       detectPaymentReceipt({
-        incomingText: incoming.text,
+        incomingText: batchedIncomingText,
         recentHistory,
-        hasPhoto: incoming.type === "IMAGE",
+        hasPhoto: batchHasPhoto,
       })
     ) {
       let receiptResult: {
@@ -620,7 +756,7 @@ export async function POST(request: Request) {
         decision: string;
       };
 
-      if (incoming.type === "IMAGE") {
+      if (batchHasPhoto) {
         receiptResult = await handleReceiptImageMessage({
           incoming,
           lead: {
@@ -635,7 +771,7 @@ export async function POST(request: Request) {
       } else {
         receiptResult = {
           text:
-            "Recebi sim 😊 vou conferir aqui e já começo a restauração da sua foto com todo carinho.",
+            "Recebi sim 😊 vou conferir aqui e, estando certinho, sigo por aqui com você.",
           stage: PAYMENT_STAGE_RECEIPT_SENT,
           analysis: null,
           decision: "text_receipt_fallback",
@@ -657,7 +793,7 @@ export async function POST(request: Request) {
           message: "Lead informou pagamento por texto. Conferir pagamento manualmente.",
           analysis: null,
           stage: PAYMENT_STAGE_RECEIPT_SENT,
-          incomingType: incoming.type,
+          incomingType: batchHasPhoto ? "IMAGE" : incoming.type,
         });
       }
 
@@ -679,7 +815,7 @@ export async function POST(request: Request) {
       return NextResponse.json(payload);
     }
 
-    if (detectPaymentIntent({ incomingText: incoming.text })) {
+    if (detectPaymentIntent({ incomingText: batchedIncomingText, recentHistory, hasPhoto: batchHasPhoto })) {
       const paymentMessages = sendPixAsSeparateMessage();
 
       await prisma.lead.update({
@@ -723,7 +859,7 @@ export async function POST(request: Request) {
     // ── Resposta da IA ───────────────────────────────────────
     const prompt = await promptService.getActivePrompt();
     const aiRecentHistory = recentHistory.slice(-6);
-    const aiIncomingText = buildAiIncomingText(incoming, hasRecentPixInHistory);
+    const aiIncomingText = batchedIncomingText;
 
     const systemPrompt = promptService.composeSystemPrompt({
       prompt,
@@ -755,7 +891,7 @@ export async function POST(request: Request) {
       safetyContext: {
         incomingText: aiIncomingText,
         recentHistory: aiRecentHistory,
-        hasPhoto: incoming.type === "IMAGE",
+        hasPhoto: batchHasPhoto,
       },
     }), AI_RESPONSE_TIMEOUT_MS);
 
@@ -777,12 +913,17 @@ export async function POST(request: Request) {
     const safeResponse = sanitizeAIResponse(aiResponse.output, {
       incomingText: aiIncomingText,
       recentHistory: aiRecentHistory,
-      hasPhoto: incoming.type === "IMAGE",
+      hasPhoto: batchHasPhoto,
     });
-    const commercialResponse = ensureSalesCTA(safeResponse.output, {
+    const commercialDraft = ensureSalesCTA(safeResponse.output, {
       incomingText: aiIncomingText,
       recentHistory: aiRecentHistory,
-      hasPhoto: incoming.type === "IMAGE",
+      hasPhoto: batchHasPhoto,
+    });
+    const commercialResponse = normalizeCommercialResponse(commercialDraft, {
+      incomingText: aiIncomingText,
+      recentHistory: aiRecentHistory,
+      hasPhoto: batchHasPhoto,
     });
     const responseMessages = splitResponseIntoWhatsAppMessages(commercialResponse);
     const typingDelayMs = calculateTypingDelay(commercialResponse);

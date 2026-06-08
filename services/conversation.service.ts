@@ -90,13 +90,23 @@ class ConversationService {
   }
 
   async getOrCreateOpenConversation(leadId: string) {
-    const openConversation = await prisma.conversation.findFirst({
-      where: { leadId, status: "OPEN" },
-      orderBy: { updatedAt: "desc" },
-    });
+    return prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${leadId}))`;
 
-    if (openConversation) return openConversation;
-    return this.createConversation(leadId);
+      const openConversation = await tx.conversation.findFirst({
+        where: { leadId, status: "OPEN" },
+        orderBy: { updatedAt: "desc" },
+      });
+
+      if (openConversation) return openConversation;
+
+      return tx.conversation.create({
+        data: {
+          leadId,
+          status: "OPEN",
+        },
+      });
+    });
   }
 
   async updateConversation(id: string, data: Prisma.ConversationUpdateInput) {
