@@ -149,7 +149,8 @@ Ver `.env.example` para lista completa comentada. Principais:
 ```env
 DATABASE_URL=                          # PostgreSQL Supabase (pooler)
 DIRECT_URL=                            # Supabase direct (para migrações)
-ADMIN_SESSION_SECRET=                  # JWT do painel admin (OBRIGATÓRIO em prod)
+ADMIN_SESSION_SECRET=                  # JWT do painel admin (defina na Vercel). Aliases: JWT_SECRET, NEXTAUTH_SECRET.
+                                       # Em prod sem valor, a sessão é derivada do DATABASE_URL — nunca do "dev-secret" público.
 OPENROUTER_API_KEY=                    # Chave da IA
 OPENROUTER_DEFAULT_MODEL=deepseek/deepseek-chat
 BAILEYS_BRIDGE_API_KEY=local-bridge-key
@@ -283,9 +284,10 @@ Antes de tráfego real, rodar a sequência:
 | Problema | Impacto | Status |
 |---|---|---|
 | Tunnel Cloudflare expirado | Envio manual e disparos não funcionam | Ativo — criar novo tunnel quando precisar |
-| `validatePromptMaster` checa "9,99" | Warning no log (não bloqueia IA) | Baixo — corrigir em sessão futura |
+| `buildExpectedPaymentData` usa default "9.99" | Valor esperado do comprovante fica desatualizado se a conversa não citou preço | Baixo — não bloqueia, só afeta `matchesAmount` |
 | Automações não executam | UI só salva regras, não dispara | Backlog |
-| `dev-secret` fallback em lib/session.ts | Risco se ADMIN_SESSION_SECRET não definida na Vercel | Verificar env vars na Vercel |
+| Segredo de sessão (`lib/session.ts`) | **Corrigido** — não usa mais o "dev-secret" público em prod (deriva do DATABASE_URL). **Falta** definir `ADMIN_SESSION_SECRET` no painel da Vercel para um valor dedicado | ⚠️ Ação pendente na Vercel |
+| Webhook `/api/webhooks/evolution` sem assinatura | Endpoint público aceita qualquer POST (pode injetar mensagem / gastar crédito de IA) | Recomendado — exige mudança coordenada bridge+webhook |
 
 ---
 

@@ -50,3 +50,4 @@ next-env.d.ts
 # Runtime/temporários
 logs-iniciar.txt
 qr-whatsapp.png
+.codex-admin-console-dev*.log

@@ -1156,9 +1156,25 @@ export async function POST(request: Request) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erro desconhecido no webhook";
 
+    // Serializa o payload de forma legível (String(payload) viraria "[object Object]"
+    // e perderia todo o contexto do erro). JSON.stringify protege contra ciclos.
+    let rawPayload: string;
+    try {
+      rawPayload = JSON.stringify(payload).slice(0, 1000);
+    } catch {
+      rawPayload = String(payload).slice(0, 1000);
+    }
+
     // Log de erro sem bloquear o retorno
     prisma.log.create({
-      data: { type: "WEBHOOK_ERROR", message, payload: { raw: String(payload).slice(0, 500) } },
+      data: {
+        type: "WEBHOOK_ERROR",
+        message,
+        payload: {
+          raw: rawPayload,
+          stack: error instanceof Error ? error.stack?.slice(0, 1500) ?? null : null,
+        },
+      },
     }).catch(() => { /* silencioso */ });
 
     // Retornar 200 para não causar retry infinito da Evolution API
