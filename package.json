@@ -22,6 +22,8 @@
     "start:local": "concurrently --names \"APP,WHATSAPP\" --prefix-colors \"cyan,green\" \"npm run dev\" \"npm run bridge:local\"",
     "whatsapp": "node scripts/start-whatsapp.mjs",
     "ai:check": "tsx scripts/ai-check.ts",
+    "test:ai-conversations": "tsx tests/ai-conversations/run.ts",
+    "eval:ai-live": "tsx tests/ai-conversations/eval-live.ts",
     "test:webhook-logic": "tsx scripts/test-webhook-logic.ts",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",

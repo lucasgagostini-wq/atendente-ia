@@ -114,6 +114,12 @@ npm run ai:check
 # Testes unitários de segurança da IA
 npm run test:ai-safety
 
+# Regressão de conversas reais (sem WhatsApp) — ver docs/AI_CONVERSATION_TESTING.md
+npm run test:ai-conversations
+
+# Eval opcional com IA real (precisa de OPENROUTER_API_KEY)
+npm run eval:ai-live
+
 # Testes de timing do "digitando"
 npm run test:typing-delay
 
@@ -157,6 +163,7 @@ BAILEYS_BRIDGE_API_KEY=local-bridge-key
 BAILEYS_BRIDGE_WEBHOOK_URL=https://atendente-ia-eight.vercel.app/api/webhooks/evolution
 TYPING_COVER_MS=12000                  # Cobertura de "composing" antes da IA responder
 INCOMING_MESSAGE_DEBOUNCE_MS=2500      # Legacy — substituído por waitForInboundSilence
+AI_DEBUG=true                          # Liga o snapshot de diagnóstico da IA (dados mascarados). Ver docs/AI_CONVERSATION_TESTING.md
 ```
 
 ---
@@ -299,6 +306,15 @@ Antes de tráfego real, rodar a sequência:
 - **Sempre** rodar `npm run test:ai-safety` e `npm run test:typing-delay` depois de alterar `services/ai-safety.service.ts` ou `lib/typing-delay.ts`
 - **Sempre** verificar que `INCOMING_MESSAGE_DEBOUNCE_MS` está definido — o debounce antigo foi substituído por `waitForInboundSilence` mas a var ainda existe
 - **Push para `main` = deploy imediato na Vercel** — testar localmente antes
+
+---
+
+## 18. Regressão de conversas + diagnóstico (novo)
+
+- `npm run test:ai-conversations` — cenários reais (caso "Sim após Pix", edição simples, comprovante pós-Pix, etc.) sem WhatsApp/DB/LLM.
+- `AI_DEBUG=true` — snapshot mascarado por resposta (flags de estado, texto consolidado, resposta bruta x final).
+- Correções de estado/guardrail aplicadas: marca `[FOTO_RECEBIDA]` no summary, confirmação afirmativa pós-Pix vira Pix determinístico, supressão de reinício de venda pós-Pix, remoção de eco do bloco anterior.
+- **Detalhes completos em `docs/AI_CONVERSATION_TESTING.md`.**
 
 ---
 

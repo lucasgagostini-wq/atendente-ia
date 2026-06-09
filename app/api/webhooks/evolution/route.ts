@@ -33,19 +33,24 @@ import {
   PAYMENT_STAGE_RECEIPT_SENT,
   PAYMENT_STAGE_WAITING_RECEIPT,
   buildExpectedPaymentData,
+  conversationHasServiceImage,
   detectPaymentIntent,
   detectPaymentReceipt,
   detectIfWaitingPaymentReceipt,
+  detectServiceType,
   ensureSalesCTA,
   hasRecentPixContext,
+  markServiceImageReceived,
   normalizeCommercialResponse,
   safeFallbackForStage,
   sanitizeAIResponse,
   sendPixAsSeparateMessage,
   splitResponseIntoWhatsAppMessages,
+  summaryHasServiceImage,
   updateConversationStage,
   validatePromptMaster,
 } from "@/services/ai-safety.service";
+import { buildAiDebugSnapshot, emitAiDebug } from "@/lib/ai-debug";
 import {
   AI_RESPONSE_TIMEOUT_MS,
   calculateTypingDelay,
@@ -642,6 +647,35 @@ export async function POST(request: Request) {
       hasPhoto: batchHasPhoto,
     });
 
+    // Estado persistente: a foto pode ter chegado em rodadas anteriores e saído
+    // da janela curta de histórico. Considera burst + marca no summary + histórico.
+    const conversationHasPhoto = conversationHasServiceImage({
+      recentHistory,
+      summary: lead.summary,
+      hasPhoto: batchHasPhoto,
+    });
+
+    const aiDebugFlags = {
+      hasServiceImage: conversationHasPhoto,
+      askedForPix: detectPaymentIntent({
+        incomingText: batchedIncomingText,
+        recentHistory,
+        hasPhoto: batchHasPhoto,
+      }),
+      pixAlreadySent: hasRecentPixInHistory,
+      awaitingReceipt: isWaitingReceipt,
+      isReceiptCandidate: detectPaymentReceipt({
+        incomingText: batchedIncomingText,
+        recentHistory,
+        hasPhoto: batchHasPhoto,
+      }),
+      serviceType: detectServiceType({
+        incomingText: batchedIncomingText,
+        recentHistory,
+        hasPhoto: batchHasPhoto,
+      }),
+    };
+
     if (isWaitingReceipt && batchHasPhoto && !hasRecentPixInHistory) {
       await prisma.log.create({
         data: {
@@ -714,6 +748,22 @@ export async function POST(request: Request) {
         });
       }
 
+      emitAiDebug(
+        buildAiDebugSnapshot({
+          leadId: lead.id,
+          phone: lead.phone,
+          funnelStageBefore: lead.funnelStage,
+          funnelStageAfter: "CHECKOUT",
+          batchSize: batchedInboundMessages.length,
+          flags: aiDebugFlags,
+          consolidatedText: batchedIncomingText,
+          rawResponse: null,
+          finalResponse: receiptResult.text,
+          route: `payment_receipt:${receiptResult.decision}`,
+        }),
+        prisma,
+      );
+
       const payload = await saveAndSendMessages({
         conversationId: conversation.id,
         leadId: lead.id,
@@ -735,6 +785,22 @@ export async function POST(request: Request) {
 
     if (detectPaymentIntent({ incomingText: batchedIncomingText, recentHistory, hasPhoto: batchHasPhoto })) {
       const paymentMessages = sendPixAsSeparateMessage();
+
+      emitAiDebug(
+        buildAiDebugSnapshot({
+          leadId: lead.id,
+          phone: lead.phone,
+          funnelStageBefore: lead.funnelStage,
+          funnelStageAfter: "CHECKOUT",
+          batchSize: batchedInboundMessages.length,
+          flags: aiDebugFlags,
+          consolidatedText: batchedIncomingText,
+          rawResponse: null,
+          finalResponse: paymentMessages.join("\n"),
+          route: "payment_intent",
+        }),
+        prisma,
+      );
 
       await prisma.lead.update({
         where: { id: lead.id },
@@ -780,6 +846,25 @@ export async function POST(request: Request) {
     const aiRecentHistory = recentHistory.slice(-6);
     const aiIncomingText = batchedIncomingText;
 
+    // Persiste a marca de "foto recebida" para que as próximas rodadas nunca
+    // peçam a foto de novo, mesmo que ela saia da janela de histórico.
+    if (batchHasPhoto && !hasRecentPixInHistory && !summaryHasServiceImage(lead.summary)) {
+      const updatedSummary = markServiceImageReceived(lead.summary);
+      lead.summary = updatedSummary;
+      await prisma.lead.update({
+        where: { id: lead.id },
+        data: { summary: updatedSummary },
+      }).catch(() => {});
+    }
+
+    // Contexto único de segurança/guardrails — usa o estado consolidado de foto
+    // (burst + summary + histórico), não só o burst atual.
+    const aiSafetyContext = {
+      incomingText: aiIncomingText,
+      recentHistory: aiRecentHistory,
+      hasPhoto: conversationHasPhoto,
+    };
+
     const systemPrompt = promptService.composeSystemPrompt({
       prompt,
       lead,
@@ -807,11 +892,7 @@ export async function POST(request: Request) {
         { role: "user", content: aiIncomingText },
       ],
       maxTokens: 220,
-      safetyContext: {
-        incomingText: aiIncomingText,
-        recentHistory: aiRecentHistory,
-        hasPhoto: batchHasPhoto,
-      },
+      safetyContext: aiSafetyContext,
     }), AI_RESPONSE_TIMEOUT_MS);
 
     if (aiResponse.model === "safe-fallback/timeout") {
@@ -829,21 +910,25 @@ export async function POST(request: Request) {
       });
     }
 
-    const safeResponse = sanitizeAIResponse(aiResponse.output, {
-      incomingText: aiIncomingText,
-      recentHistory: aiRecentHistory,
-      hasPhoto: batchHasPhoto,
-    });
-    const commercialDraft = ensureSalesCTA(safeResponse.output, {
-      incomingText: aiIncomingText,
-      recentHistory: aiRecentHistory,
-      hasPhoto: batchHasPhoto,
-    });
-    const commercialResponse = normalizeCommercialResponse(commercialDraft, {
-      incomingText: aiIncomingText,
-      recentHistory: aiRecentHistory,
-      hasPhoto: batchHasPhoto,
-    });
+    const safeResponse = sanitizeAIResponse(aiResponse.output, aiSafetyContext);
+    const commercialDraft = ensureSalesCTA(safeResponse.output, aiSafetyContext);
+    const commercialResponse = normalizeCommercialResponse(commercialDraft, aiSafetyContext);
+
+    emitAiDebug(
+      buildAiDebugSnapshot({
+        leadId: lead.id,
+        phone: lead.phone,
+        funnelStageBefore: lead.funnelStage,
+        funnelStageAfter: lead.funnelStage,
+        batchSize: batchedInboundMessages.length,
+        flags: aiDebugFlags,
+        consolidatedText: aiIncomingText,
+        rawResponse: aiResponse.output,
+        finalResponse: commercialResponse,
+        route: "ai_response",
+      }),
+      prisma,
+    );
 
     if (!(await isInboundRoundCurrent({
       conversationId: conversation.id,

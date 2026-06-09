@@ -84,16 +84,65 @@ function compactText(context: SafetyContext) {
     .toLowerCase();
 }
 
+// Confirmações afirmativas curtas ("sim", "pode", "isso", "bora"...). Ancoradas
+// no início para não casar com "simples", "podemos ver depois", etc.
+const AFFIRMATIVE_CONFIRMATION_PATTERN =
+  /^(s[ií]m?|isso( mesmo)?|claro|pode( sim| ser| mandar)?|quero( sim| essa)?|manda( sim)?|bora|vamos|fechad[oa]|fechou|ok|por favor|aham|uhum|t[aá] bom|beleza|blz|com certeza|essa mesmo)\b/i;
+
+// Sinais de que a ÚLTIMA mensagem do atendente ofereceu o Pix.
+const ASSISTANT_PIX_OFFER_PATTERN =
+  /quer que eu te (mande|passe) o pix|te mando o pix|posso te (mandar|passar) o pix|te passar o pix|mandar o pix|passo o pix|envio o pix|te envio o pix/i;
+
+export function isAffirmativeConfirmation(text?: string | null) {
+  return AFFIRMATIVE_CONFIRMATION_PATTERN.test(normalize(text));
+}
+
+export function lastAssistantOfferedPix(recentHistory: string[] = []) {
+  const assistantLines = recentHistory.filter((line) => /^\s*atendente:/i.test(line));
+  const lastAssistant = assistantLines.at(-1) ?? "";
+  return ASSISTANT_PIX_OFFER_PATTERN.test(lastAssistant);
+}
+
 export function detectPaymentIntent(context: SafetyContext = {}) {
   const text = normalize(context.incomingText).toLowerCase();
-  return /(manda|passa|envia|mande).{0,20}(pix|chave)|(pode mandar|manda|passa).{0,10}(a )?(chave|pix)|qual.{0,10}pix|qual.{0,10}chave|como pago|como faço pra pagar|como faco pra pagar|quero pagar|vou pagar|vou fazer o pix|vou fazer pix|fazer o pix|fecho|quero fechar|fechar agora/.test(
-    text,
+  const directIntent =
+    /(manda|passa|envia|mande).{0,20}(pix|chave)|(pode mandar|manda|passa).{0,10}(a )?(chave|pix)|qual.{0,10}pix|qual.{0,10}chave|como pago|como faço pra pagar|como faco pra pagar|quero pagar|vou pagar|vou fazer o pix|vou fazer pix|fazer o pix|fecho|quero fechar|fechar agora/.test(
+      text,
+    );
+
+  if (directIntent) return true;
+
+  // "Sim"/"pode"/"isso" logo após o atendente perguntar "Quer que eu te mande o
+  // Pix?" é confirmação de pagamento → deve disparar o Pix determinístico em vez
+  // de deixar o modelo improvisar (que costuma repetir pedido de foto).
+  return (
+    lastAssistantOfferedPix(context.recentHistory ?? []) &&
+    isAffirmativeConfirmation(text)
   );
 }
 
 export function hasRecentPixContext(context: SafetyContext = {}) {
   return (context.recentHistory ?? []).some((item) =>
     RECENT_PIX_CONTEXT_PATTERNS.some((pattern) => pattern.test(item)),
+  );
+}
+
+// Subconjunto SEM o padrão de oferta ("quer que eu te mande o pix"): só conta
+// quando os DADOS do Pix realmente foram enviados (chave/nome/banco/comprovante).
+// Usado para suprimir reinício de venda — não basta ter OFERECIDO o Pix.
+const PIX_DATA_SENT_PATTERNS = [
+  /chave pix/i,
+  /estudiofotos000@gmail\.com/i,
+  /nome:\s*lucas agostini/i,
+  /banco:\s*nubank/i,
+  /lucas agostini\s*[—-]\s*nubank/i,
+  /me manda o comprovante/i,
+  /mandar o comprovante/i,
+];
+
+export function pixDataAlreadySent(context: SafetyContext = {}) {
+  return (context.recentHistory ?? []).some((item) =>
+    PIX_DATA_SENT_PATTERNS.some((pattern) => pattern.test(item)),
   );
 }
 
@@ -111,6 +160,58 @@ export function detectPaymentReceipt(context: SafetyContext = {}) {
 
 export function detectIfWaitingPaymentReceipt(summary?: string | null) {
   return Boolean(summary?.includes(PAYMENT_STAGE_WAITING_RECEIPT));
+}
+
+// ── Estado persistente de "foto de serviço já recebida" ────────────
+// O bug crítico relatado: a IA voltava a pedir a foto porque hasPhoto era
+// derivado só do burst atual + janela curta de histórico. Marcamos no summary
+// (mesmo mecanismo já usado para [PAGAMENTO: ...]) para o estado sobreviver à
+// janela deslizante de histórico.
+export const SERVICE_IMAGE_SUMMARY_MARKER = "[FOTO_RECEBIDA]";
+
+const SERVICE_IMAGE_HISTORY_PATTERN =
+  /cliente (j[aá] )?enviou uma foto|foto para restaurar|\[cliente.*foto/i;
+
+export function summaryHasServiceImage(summary?: string | null) {
+  return Boolean(summary?.includes(SERVICE_IMAGE_SUMMARY_MARKER));
+}
+
+export function markServiceImageReceived(summary?: string | null) {
+  const current = normalize(summary);
+  if (summaryHasServiceImage(current)) return current;
+  return [current, SERVICE_IMAGE_SUMMARY_MARKER].filter(Boolean).join("\n");
+}
+
+/**
+ * Verdadeiro se a conversa já recebeu uma foto de serviço em QUALQUER ponto:
+ * via burst atual (hasPhoto), marca persistente no summary, ou histórico.
+ * Usado para nunca mais pedir a foto depois que ela chegou.
+ */
+export function conversationHasServiceImage(context: SafetyContext & { summary?: string | null } = {}) {
+  if (context.hasPhoto) return true;
+  if (summaryHasServiceImage(context.summary)) return true;
+  return (context.recentHistory ?? []).some((item) => SERVICE_IMAGE_HISTORY_PATTERN.test(item));
+}
+
+/** Alias semântico — Pix já foi enviado/aparece no histórico recente. */
+export function pixAlreadySent(context: SafetyContext = {}) {
+  return hasRecentPixContext(context);
+}
+
+// ── Tipo de serviço (restauração x edição simples) ─────────────────
+const SIMPLE_EDIT_PATTERN =
+  /tirar?\s+(a|o|essa|esse|aquela|aquele|um|uma)?\s*(pessoa|gente|mulher|homem|fundo|objeto|sombra)|remover|apagar (a|o|essa)|tira a |tira o |trocar (o |a )?fundo|mudar (o |a )?fundo|fundo branco|colocar (no |num )?fundo|recortar|recorta|juntar (as |duas )?fotos|montar|adicionar|colorir|deixar colorid|preto e branco|melhorar (a )?qualidade|aumentar (a )?qualidade|deixar (mais )?nitid/i;
+
+const RESTORATION_PATTERN =
+  /restaur|antiga|rasgad|manchad|desbotad|amarelad|danificad|estragad|vinco|riscad|recuperar (a |essa )?foto/i;
+
+export function detectServiceType(
+  context: SafetyContext = {},
+): "simple_edit" | "restoration" | "unknown" {
+  const text = compactText(context);
+  if (SIMPLE_EDIT_PATTERN.test(text)) return "simple_edit";
+  if (RESTORATION_PATTERN.test(text)) return "restoration";
+  return "unknown";
 }
 
 export function buildExpectedPaymentData(conversationContext?: SafetyContext) {
@@ -362,6 +463,42 @@ function asksForPhotoAgain(response: string) {
   return /me manda a foto|manda a foto|envia a foto|me envia a foto|manda aqui que eu vejo|envia aqui que eu vejo|pode mandar a foto|mande a foto/i.test(response);
 }
 
+// Depois que o Pix já foi enviado, a IA NÃO pode reabrir venda (re-ofertar Pix,
+// repetir preço de fechamento) nem pedir a foto de novo. Remove essas frases.
+function removePostPixSaleRestart(response: string) {
+  return response
+    .replace(/(?:quer que eu te (mande|passe) o pix|posso te (mandar|passar) o pix|te mando o pix|te passar o pix|quer que eu te passe o pix)[^.!?]*[.!?]?/gi, "")
+    .replace(/(?:pra fazer[^.!?]*fica\s*r\$\s*\d+[^.!?]*[.!?]?)/gi, "")
+    .replace(/(?:me manda a foto|manda a foto|envia a foto|me envia a foto|mande a foto|manda aqui que eu vejo)[^.!?]*[.!?]?/gi, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+// Remove parágrafos longos que apenas repetem, palavra por palavra, algo que o
+// atendente JÁ disse (evita reenviar o bloco inteiro quando o lead manda "?").
+// Mantém linhas curtas (CTAs) para não esvaziar a resposta.
+const ECHO_MIN_LENGTH = 40;
+
+function removeEchoedAssistantLines(lines: string[], recentHistory: string[] = []) {
+  const assistantNorms = recentHistory
+    .filter((line) => /^\s*atendente:/i.test(line))
+    .map((line) => normalizeForComparison(line.replace(/^\s*atendente:\s*/i, "")))
+    .filter((norm) => norm.length >= ECHO_MIN_LENGTH);
+
+  if (!assistantNorms.length) return lines;
+
+  // Só remove PARÁGRAFOS longos repetidos; CTAs curtos ("Quer que eu te mande o
+  // Pix?") ficam preservados mesmo que tenham aparecido antes.
+  const filtered = lines.filter((line) => {
+    const norm = normalizeForComparison(line);
+    if (norm.length < ECHO_MIN_LENGTH) return true;
+    return !assistantNorms.some((prev) => prev === norm || prev.includes(norm) || norm.includes(prev));
+  });
+
+  return filtered.length ? filtered : lines;
+}
+
 function responseAsksQuantity(response: string) {
   return /quantas fotos|quantas voc[eê] gostaria|quantas quer|mais de uma foto|pacote maior/i.test(response);
 }
@@ -457,6 +594,27 @@ export function normalizeCommercialResponse(response: string, context: SafetyCon
   let output = normalize(response);
   if (!output) return output;
 
+  // ── Pós-Pix: jamais reiniciar a venda nem pedir a foto de novo ──
+  // Só ativa quando os DADOS do Pix já foram enviados (não na mera oferta).
+  if (pixDataAlreadySent(context)) {
+    let postPix = removeOpenEndedAdjustmentPromises(output);
+    postPix = removePassiveClosers(postPix);
+    postPix = removePostPixSaleRestart(postPix);
+
+    const postPixLines = dedupeRepeatedLines(
+      postPix.split(/\n+/).map((line) => line.trim()).filter(Boolean),
+    );
+    let joined = removeEchoedAssistantLines(postPixLines, context.recentHistory ?? []).join("\n\n").trim();
+
+    if (!joined) {
+      joined = "Recebi 😊 assim que você me mandar o comprovante, eu começo por aqui.";
+    } else if (!/comprovante/i.test(joined)) {
+      joined = `${joined}\n\nAssim que você me mandar o comprovante, eu começo por aqui.`;
+    }
+
+    return joined;
+  }
+
   const singlePhotoContext = isSpecificSinglePhotoContext(context);
   const askedPrice = detectObjectionType(context) === "price" || hasPriceInContext(context);
   const forcedObjectionReply = guardrailReplyForObjection(context);
@@ -492,7 +650,10 @@ export function normalizeCommercialResponse(response: string, context: SafetyCon
     .split(/\n+/)
     .map((line) => line.trim())
     .filter(Boolean);
-  const dedupedLines = dedupeRepeatedLines(lines);
+  const dedupedLines = removeEchoedAssistantLines(
+    dedupeRepeatedLines(lines),
+    context.recentHistory ?? [],
+  );
 
   return dedupedLines.join("\n\n");
 }
@@ -500,7 +661,17 @@ export function normalizeCommercialResponse(response: string, context: SafetyCon
 export function ensureSalesCTA(response: string, context: SafetyContext = {}) {
   const output = normalize(response);
 
-  if (!output || isGoodbyeOrHardNo(context) || hasCommercialCTA(output)) {
+  if (!output || isGoodbyeOrHardNo(context)) {
+    return output;
+  }
+
+  // Pós-Pix: não anexar CTA de venda. A próxima ação esperada é o comprovante.
+  if (pixDataAlreadySent(context)) {
+    if (/comprovante/i.test(output)) return output;
+    return `${output}\n\nAssim que você me mandar o comprovante, eu começo por aqui.`;
+  }
+
+  if (hasCommercialCTA(output)) {
     return output;
   }
 
