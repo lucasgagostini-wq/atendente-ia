@@ -11,7 +11,9 @@
  */
 
 import { fixtures } from "./fixtures";
+import { sequences } from "./sequences";
 import { simulateConversation } from "./simulate";
+import type { PixReceiptAnalysis } from "../../services/payment-receipt.service";
 import { evaluateOutput } from "./asserts";
 
 let passed = 0;
@@ -65,6 +67,90 @@ for (const fixture of fixtures) {
       console.error(`     · ${problem}`);
     }
     console.error(`     saída final:\n       ${result.finalText.replace(/\n/g, "\n       ")}`);
+  }
+}
+
+// ── Sequências multi-turno ──────────────────────────────────────────
+// Cada turno do cliente é processado com o histórico acumulado (incluindo as
+// respostas da IA dos turnos anteriores). Pega bugs de repetição entre turnos.
+console.log("\n▶ Sequências multi-turno (pós-comprovante / anti-repetição)\n");
+
+function normalizeFinal(text: string) {
+  return text
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+for (const sequence of sequences) {
+  const workingHistory = [...sequence.initialHistory];
+  const turnFinals: string[] = [];
+  const problems: string[] = [];
+
+  for (const turn of sequence.turns) {
+    const result = simulateConversation({
+      recentHistory: [...workingHistory],
+      summary: sequence.summary,
+      batch: turn.batch,
+      mockModelResponse: turn.mockModelResponse,
+      mockReceiptAnalysis: turn.mockReceiptAnalysis as Partial<PixReceiptAnalysis> | undefined,
+    });
+    turnFinals.push(result.finalText);
+
+    if (turn.expect.route && result.route !== turn.expect.route) {
+      problems.push(`[${turn.label}] rota: esperado "${turn.expect.route}", obtido "${result.route}"`);
+    }
+    if (turn.expect.maxMessages != null && result.messages.length > turn.expect.maxMessages) {
+      problems.push(`[${turn.label}] mensagens: ${result.messages.length} > máx ${turn.expect.maxMessages}`);
+    }
+    const failures = evaluateOutput(result.finalText, {
+      forbidden: turn.expect.forbidden,
+      required: turn.expect.required,
+    });
+    for (const failure of failures) {
+      const kind = failure.kind === "forbidden" ? "proibido encontrado" : "obrigatório ausente";
+      problems.push(`[${turn.label}] ${kind}: /${failure.pattern}/ → "${result.finalText.replace(/\n/g, " ⏎ ")}"`);
+    }
+
+    // Acrescenta a rodada ao histórico para o próximo turno (cliente + IA).
+    for (const message of turn.batch) {
+      workingHistory.push(`Lead: ${message.content}`);
+    }
+    for (const message of result.messages) {
+      workingHistory.push(`Atendente: ${message}`);
+    }
+  }
+
+  // Asserções globais da sequência.
+  if (sequence.globals?.phraseAtMostOnce) {
+    for (const rule of sequence.globals.phraseAtMostOnce) {
+      const hits = turnFinals.filter((text) => rule.pattern.test(text)).length;
+      if (hits > rule.max) {
+        problems.push(`frase /${rule.pattern.source}/ apareceu em ${hits} turnos (máx ${rule.max})`);
+      }
+    }
+  }
+  if (sequence.globals?.noConsecutiveDuplicates) {
+    for (let i = 1; i < turnFinals.length; i += 1) {
+      if (normalizeFinal(turnFinals[i]) === normalizeFinal(turnFinals[i - 1])) {
+        problems.push(`turnos ${i} e ${i + 1} têm resposta idêntica (repetição)`);
+      }
+    }
+  }
+
+  if (problems.length === 0) {
+    passed++;
+    console.log(`  ✅ ${sequence.id} — ${sequence.title}`);
+    console.log(`     causa coberta: ${sequence.classification} | turnos: ${sequence.turns.length}`);
+  } else {
+    failed++;
+    console.error(`  ❌ ${sequence.id} — ${sequence.title}`);
+    console.error(`     causa: ${sequence.classification}`);
+    for (const problem of problems) {
+      console.error(`     · ${problem}`);
+    }
   }
 }
 

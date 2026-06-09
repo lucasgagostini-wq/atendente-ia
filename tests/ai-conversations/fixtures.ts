@@ -340,6 +340,27 @@ export const fixtures: Fixture[] = [
     },
   },
 
+  // ── M) Áudio sem transcrição ──────────────────────────────────
+  {
+    id: "m_audio_without_transcription_asks_text",
+    title: "M) Áudio sem transcrição → pede confirmação por escrito, não inventa",
+    classification: "estado + guardrail (mídia)",
+    description:
+      "Cliente manda só um áudio (sem transcrição). A IA não pode inventar o conteúdo: responde curto pedindo confirmação por escrito.",
+    recentHistory: [
+      "Lead: Cliente enviou uma foto para restaurar.",
+      "Atendente: Recebi a foto. Dá pra trabalhar nela sim.",
+    ],
+    summary: "[FOTO_RECEBIDA]",
+    batch: [{ content: "Cliente enviou um áudio.", type: "AUDIO" }],
+    expect: {
+      route: "audio_clarification",
+      required: [/[aá]udio/i, /por escrito|confirma/i],
+      forbidden: [...POST_PHOTO_FORBIDDEN, ...ALWAYS_FORBIDDEN],
+      maxMessages: 1,
+    },
+  },
+
   {
     id: "l_invalid_receipt_then_insists_paid",
     title: "L) Comprovante inválido + insiste 'já paguei' → pedir comprovante visível",

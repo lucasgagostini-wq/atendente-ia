@@ -23,6 +23,7 @@ import {
   buildAiIncomingTextFromBatch,
   dedupeBatchParts,
   extractIncomingPayload,
+  isAudioOnlyBatchWithoutTranscription,
   normalizePhone,
   receiptDecisionFromAnalysis,
   shouldTransferToHuman,
@@ -34,6 +35,7 @@ import {
   PAYMENT_STAGE_RECEIPT_NEEDS_REVIEW,
   PAYMENT_STAGE_RECEIPT_RECEIVED_PENDING_REVIEW,
   PAYMENT_STAGE_WAITING_RECEIPT,
+  buildAudioClarificationResponse,
   buildInvalidReceiptResponse,
   buildExpectedPaymentData,
   buildPostReceiptResponse,
@@ -940,6 +942,42 @@ export async function POST(request: Request) {
           source: "payment_intent",
           paymentStage: PAYMENT_STAGE_WAITING_RECEIPT,
         } as Prisma.InputJsonValue,
+      });
+
+      return NextResponse.json(payload);
+    }
+
+    // ── Áudio sem transcrição ────────────────────────────────
+    // Não há serviço de transcrição: se chegou só áudio, NÃO deixar o modelo
+    // inventar o conteúdo. Pede confirmação por escrito e encerra a rodada.
+    if (isAudioOnlyBatchWithoutTranscription(batchedInboundMessages)) {
+      const audioMessage = buildAudioClarificationResponse();
+
+      emitAiDebug(
+        buildAiDebugSnapshot({
+          leadId: lead.id,
+          phone: lead.phone,
+          funnelStageBefore: lead.funnelStage,
+          funnelStageAfter: lead.funnelStage,
+          batchSize: batchedInboundMessages.length,
+          flags: aiDebugFlags,
+          consolidatedText: batchedIncomingText,
+          rawResponse: null,
+          finalResponse: audioMessage,
+          route: "audio_clarification",
+        }),
+        prisma,
+      );
+
+      const payload = await saveAndSendMessages({
+        conversationId: conversation.id,
+        leadId: lead.id,
+        phone: lead.phone,
+        messages: [audioMessage],
+        replyTransport: incoming.replyTransport,
+        typingStartedAt,
+        roundInboundMessageId: inboundMessage.id,
+        metadata: { source: "audio_clarification" } as Prisma.InputJsonValue,
       });
 
       return NextResponse.json(payload);

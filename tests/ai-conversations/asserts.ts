@@ -88,6 +88,14 @@ export const POST_RECEIPT_FORBIDDEN: RegExp[] = [
   /j[aá] comecei/i,
 ];
 
+// Pós-comprovante: o prazo (24h) NÃO pode aparecer quando o cliente não
+// perguntou sobre tempo. Usado para travar o bug de repetição da frase de prazo.
+export const DEADLINE_PHRASE_FORBIDDEN: RegExp[] = [
+  /at[eé]\s*24h/i,
+  /at[eé]\s*24\s*horas/i,
+  /prazo/i,
+];
+
 // Linguagem emocional que NÃO deve aparecer se o cliente não trouxe o contexto.
 export const EMOTIONAL_LANGUAGE: RegExp[] = [
   /\bav[oó]\b/i,

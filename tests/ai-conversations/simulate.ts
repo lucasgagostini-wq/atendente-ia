@@ -15,11 +15,13 @@
 
 import {
   buildAiIncomingTextFromBatch,
+  isAudioOnlyBatchWithoutTranscription,
   receiptDecisionFromAnalysis,
   type PendingInboundMessage,
 } from "../../lib/webhook-helpers";
 import type { PixReceiptAnalysis } from "../../services/payment-receipt.service";
 import {
+  buildAudioClarificationResponse,
   conversationHasServiceImage,
   detectIfWaitingPaymentReceipt,
   detectIfPaymentReceiptInvalid,
@@ -52,7 +54,8 @@ export type SimRoute =
   | "payment_intent"
   | "ai_response"
   | "post_receipt_state"
-  | "invalid_receipt_state";
+  | "invalid_receipt_state"
+  | "audio_clarification";
 
 export type SimResult = {
   route: SimRoute;
@@ -177,6 +180,12 @@ export function simulateConversation(state: ConversationState): SimResult {
   if (detectPaymentIntent({ incomingText: batchedIncomingText, recentHistory, hasPhoto: batchHasPhoto })) {
     const messages = sendPixAsSeparateMessage();
     return { route: "payment_intent", messages, finalText: messages.join("\n"), flags };
+  }
+
+  // ── Gate 2.5: áudio sem transcrição ─────────────────────────
+  if (isAudioOnlyBatchWithoutTranscription(batch)) {
+    const message = buildAudioClarificationResponse();
+    return { route: "audio_clarification", messages: [message], finalText: message, flags };
   }
 
   // ── Gate 3: resposta da IA + guardrails ─────────────────────

@@ -380,7 +380,9 @@ const postReceiptMessages = splitResponseIntoWhatsAppMessages(
 );
 assert.match(postReceiptMessages.join("\n"), /recebi o comprovante/i);
 assert.match(postReceiptMessages.join("\n"), /conferindo/i);
-assert.match(postReceiptMessages.join("\n"), /até 24h|até 24 horas/i);
+// "Já paguei" NÃO pergunta sobre tempo → o prazo (24h) NÃO pode aparecer.
+// Esse era o bug do caso real: a IA repetia a frase de prazo para tudo.
+assert.doesNotMatch(postReceiptMessages.join("\n"), /até 24h|até 24 horas|prazo/i);
 assert.doesNotMatch(postReceiptMessages.join("\n"), /me manda o comprovante|quer que eu te mande o pix|manda a foto/i);
 assert.doesNotMatch(postReceiptMessages.join("\n"), /pagamento confirmado|já caiu|já comecei/i);
 
@@ -404,6 +406,51 @@ assert.match(
   }),
   /recebi o comprovante[\s\S]*24h[\s\S]*(cuidado|pedido já está separado)/i,
 );
+// ── Pós-comprovante: respostas sociais naturais (caso real cicero) ──
+const RECEIPT_RECEIVED_SUMMARY = `[PAGAMENTO: ${PAYMENT_STAGE_RECEIPT_RECEIVED_PENDING_REVIEW}]`;
+function postReceipt(incomingText: string, recentHistory: string[] = []) {
+  return buildPostReceiptResponse({ incomingText, summary: RECEIPT_RECEIVED_SUMMARY, recentHistory });
+}
+
+// nome do titular informado → agradece o aviso, sem prazo
+const payerName = postReceipt("Ok esse nome que enviou é da minha esposa.");
+assert.match(payerName, /conferir|conferindo/i);
+assert.doesNotMatch(payerName, /até 24h|prazo/i);
+
+// agradecimento → agradece de volta, sem prazo
+const thanks = postReceipt("Ok obg");
+assert.match(thanks, /agrade[cç]|imagina|tamo junto/i);
+assert.doesNotMatch(thanks, /até 24h|prazo/i);
+
+// "tá na conta" → confirma conferência, sem prazo
+const inAccount = postReceipt("Ok tá na conta kkk");
+assert.match(inAccount, /conferir|pedido/i);
+assert.doesNotMatch(inAccount, /até 24h|prazo/i);
+
+// vai mandar mais fotos → diz que pode mandar, sem prazo
+const morePhotos = postReceipt("E vou procurar mais fotos");
+assert.match(morePhotos, /manda|separar|me envia/i);
+assert.doesNotMatch(morePhotos, /até 24h|prazo/i);
+
+// elogio/indicação → agradece, sem prazo
+const referral = postReceipt("Capricha vou te indicar pra muita gente");
+assert.match(referral, /caprichar|pode deixar/i);
+assert.doesNotMatch(referral, /até 24h|prazo/i);
+
+// pergunta de tempo → AÍ SIM o prazo de 24h aparece
+const deadlineAsked = postReceipt("Quanto tempo demora?");
+assert.match(deadlineAsked, /até 24h/i);
+
+// anti-repetição: se a última fala já foi a frase de prazo, não repetir
+const deadlineNoRepeat = postReceipt("Quanto tempo demora?", [
+  "Atendente: Fica pronto em até 24h após a confirmação do pagamento.",
+]);
+assert.match(deadlineNoRepeat, /até 24h/i);
+assert.notEqual(
+  deadlineNoRepeat.trim(),
+  "Fica pronto em até 24h após a confirmação do pagamento.",
+);
+
 assert.match(buildInvalidReceiptResponse(), /valor, data e recebedor/i);
 
 for (const message of specificPhotoPriceMessages) {

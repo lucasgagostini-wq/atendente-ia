@@ -119,6 +119,12 @@ export function extractIncomingPayload(payload: any): IncomingPayload | null {
       : "Cliente enviou uma foto para restaurar.";
   }
 
+  // Áudio sem legenda/transcrição: injeta marcador para não ser descartado.
+  // O webhook responde pedindo confirmação por escrito (nunca inventa o áudio).
+  if ((!text || typeof text !== "string" || text.trim().length === 0) && type === "AUDIO") {
+    text = "Cliente enviou um áudio.";
+  }
+
   if (!text || typeof text !== "string" || text.trim().length === 0) return null;
 
   const phone = normalizePhone(payloadPhone || remoteJid);
@@ -151,6 +157,20 @@ export function extractIncomingPayload(payload: any): IncomingPayload | null {
         : null,
     } as Prisma.InputJsonValue,
   };
+}
+
+// Marcador de áudio sem transcrição (injetado em extractIncomingPayload).
+export const AUDIO_PLACEHOLDER_PATTERN = /^cliente enviou um [aá]udio\.?$/i;
+
+/**
+ * Verdadeiro quando o batch é composto SÓ de áudios e nenhum deles tem
+ * legenda/transcrição real (todos caem no texto-marcador). Nesse caso o webhook
+ * pede confirmação por escrito em vez de deixar o modelo inventar o conteúdo.
+ */
+export function isAudioOnlyBatchWithoutTranscription(messages: PendingInboundMessage[]): boolean {
+  if (messages.length === 0) return false;
+  if (!messages.every((message) => message.type === "AUDIO")) return false;
+  return messages.every((message) => AUDIO_PLACEHOLDER_PATTERN.test(message.content.trim()));
 }
 
 /** Verifica se a mensagem deve ser transferida para humano */

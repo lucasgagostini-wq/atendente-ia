@@ -430,6 +430,89 @@ function asksQualityAfterReceipt(context: SafetyContext = {}) {
   );
 }
 
+// ── Intenções específicas do estado pós-comprovante ────────────────
+// Classificadas SOMENTE pelo texto da mensagem atual (nunca pelo histórico),
+// para que perguntas de turnos anteriores não ressuscitem o prazo.
+function compactIncoming(context: SafetyContext = {}) {
+  return normalize(context.incomingText).toLowerCase();
+}
+
+function asksPaymentConfirmation(context: SafetyContext = {}) {
+  return /confirmou|confirmad|confirma\?|j[aá] confirmou|caiu (a[ií]|na conta|certinho|sim)|recebeu (o |meu )?(pix|pagamento|comprovante)|deu certo|foi aprovad|aprovou|conseguiu (ver|confirmar)|deu pra (ver|confirmar)|chegou (o |a[ií]|certinho|pra voc)/i.test(
+    compactIncoming(context),
+  );
+}
+
+function isThanksMessage(context: SafetyContext = {}) {
+  return /\bobrigad[ao]\b|\bobg\b|\bobgd\b|\bvaleu\b|\bvlw\b|agrade[cç]|gratid[aã]o/i.test(
+    compactIncoming(context),
+  );
+}
+
+function informsPayerName(context: SafetyContext = {}) {
+  return /nome.{0,30}(esposa|marido|mulher|m[aã]e|pai|filh|irm[aã]o?|titular|minha|meu)|nome que (enviou|mandou|apareceu|veio|t[aá]|saiu)|(t[aá]|est[aá]) no nome (de|da|do)|nome (do|da) (titular|conta)|pix (t[aá]|est[aá]) no nome|conta (da|do) (minha|meu|esposa|marido)/i.test(
+    compactIncoming(context),
+  );
+}
+
+function confirmsMoneyLeftAccount(context: SafetyContext = {}) {
+  return /t[aá] na conta|na conta (j[aá]|sim|kk)|saiu (da conta|do banco|aqui|certinho|da minha)|debitad|descontad|j[aá] saiu|foi descontad|saiu o (dinheiro|valor)/i.test(
+    compactIncoming(context),
+  );
+}
+
+function willSendMorePhotos(context: SafetyContext = {}) {
+  return /procurar (mais|outras|as)?\s?fotos?|mais fotos?|outras fotos?|mandar mais (uma|fotos?)|trazer mais|vou procurar|achar (mais|outras)|ver (mais|outras) fotos?|separar (mais|outras)|tenho (mais|outras)/i.test(
+    compactIncoming(context),
+  );
+}
+
+function isReferralOrPraise(context: SafetyContext = {}) {
+  return /capricha|caprichar|vou (te )?indicar|indico voc|te indico|recomendar|recomendo|divulg|mostrar pra|falar de voc|passar pra frente|indicar pra/i.test(
+    compactIncoming(context),
+  );
+}
+
+function isShortAcknowledgement(context: SafetyContext = {}) {
+  const text = compactIncoming(context)
+    .replace(/[^a-z0-9áéíóúâêôãõç\s👍🙏❤😊😀🎉]/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) return false;
+  return /^(ok+|okay|t[aá]|certo|show|beleza|blz|joia|j[oó]ia|isso|perfeito|[oó]timo|legal|massa|top|fechou|fechado|combinado|entendi|uhum|aham|bom|boa|👍|🙏|❤|😊|kk+|rs+|haha+)(\s+(ok+|t[aá]|certo|show|blz|sim|kk+|rs+|👍|🙏|❤|😊))*$/i.test(text);
+}
+
+// ── Anti-repetição pós-comprovante ─────────────────────────────────
+// Evita reenviar uma frase igual/parecida à(s) última(s) do atendente.
+function recentAssistantNorms(recentHistory: string[] = []) {
+  return recentHistory
+    .filter((line) => /^\s*atendente:/i.test(line))
+    .map((line) => normalizeForComparison(line.replace(/^\s*atendente:\s*/i, "")))
+    .filter(Boolean);
+}
+
+function isTooSimilarToRecent(candidate: string, recentNorms: string[]) {
+  const norm = normalizeForComparison(candidate);
+  if (!norm) return false;
+  // Só compara contra as 2 últimas falas do atendente (repetição imediata).
+  const lastTwo = recentNorms.slice(-2);
+  return lastTwo.some(
+    (prev) => prev === norm || prev.includes(norm) || norm.includes(prev),
+  );
+}
+
+/**
+ * Escolhe a primeira variação do pool que não repete as últimas falas do
+ * atendente. Se todas repetirem, rotaciona pelo número de falas já ditas
+ * para garantir variação em vez de insistir na mesma frase.
+ */
+function pickNonRepeating(pool: string[], recentNorms: string[]) {
+  for (const candidate of pool) {
+    if (!isTooSimilarToRecent(candidate, recentNorms)) return candidate;
+  }
+  return pool[recentNorms.length % pool.length];
+}
+
 function normalizeDeadlinePhrases(response: string) {
   return response
     .replace(/(?:entre\s*)?2\s*a\s*5\s*dias\s*[uú]teis/gi, "até 24h após confirmação do pagamento")
@@ -464,40 +547,149 @@ function guardrailReplyForDeadline(context: SafetyContext = {}) {
   ].join("\n\n");
 }
 
+/**
+ * Resposta no estado persistente COMPROVANTE_RECEBIDO_AGUARDANDO_CONFERENCIA.
+ *
+ * Regras (do caso real cicero):
+ * - O prazo (24h) só aparece quando o cliente PERGUNTA sobre tempo/entrega.
+ *   Nunca como fallback genérico — esse era o bug que deixava a IA robótica.
+ * - Cada intenção social (agradecimento, "tá na conta", "nome é da esposa",
+ *   "vou mandar mais fotos", elogio/indicação) tem resposta natural própria.
+ * - Anti-repetição: variações são escolhidas pra não repetir a última fala.
+ * - Classificação é feita SÓ pela mensagem atual (não pelo histórico), pra
+ *   perguntas de turnos anteriores não reabrirem o prazo.
+ */
 export function buildPostReceiptResponse(context: SafetyContext = {}) {
-  const messages: string[] = [];
-  const paymentSent = mentionsPaymentSent(context);
-  const started = asksIfStarted(context);
-  const quality = asksQualityAfterReceipt(context);
-  const deadline = isDeadlineQuestion(context);
+  const inc: SafetyContext = { incomingText: context.incomingText };
+  const recentNorms = recentAssistantNorms(context.recentHistory ?? []);
 
-  if (paymentSent) {
-    messages.push("Sim, recebi o comprovante. Estou conferindo os dados do pagamento por aqui.");
+  const deadline = isDeadlineQuestion(inc);
+  const confirmation = asksPaymentConfirmation(inc);
+  const paymentSent = mentionsPaymentSent(inc);
+  const quality = asksQualityAfterReceipt(inc);
+  const started = asksIfStarted(inc);
+  const payerName = informsPayerName(inc);
+  const moneyInAccount = confirmsMoneyLeftAccount(inc);
+  const morePhotos = willSendMorePhotos(inc);
+  const referral = isReferralOrPraise(inc);
+  const thanks = isThanksMessage(inc);
+  const shortAck = isShortAcknowledgement(inc);
+
+  const segments: string[] = [];
+
+  // 1. "Já paguei" / "confirmou?" → reconhece recebimento + conferência.
+  if (confirmation || paymentSent) {
+    segments.push(
+      pickNonRepeating(
+        [
+          "Recebi o comprovante sim. Estou conferindo os dados do pagamento e já te aviso certinho.",
+          "Isso, o comprovante já chegou aqui. Tô conferindo o pagamento e já te retorno.",
+        ],
+        recentNorms,
+      ),
+    );
   }
 
-  if (quality && (deadline || paymentSent)) {
-    messages.push("Vou fazer com cuidado pra manter o rosto natural. O prazo é de até 24h após a confirmação do pagamento.");
-  } else if (quality) {
-    messages.push("Vou fazer com cuidado pra manter o rosto natural e melhorar a foto sem deixar artificial.");
+  // 2. Prazo — SOMENTE quando o cliente pergunta sobre tempo/entrega.
+  if (deadline) {
+    segments.push(
+      pickNonRepeating(
+        [
+          "Fica pronto em até 24h após a confirmação do pagamento.",
+          "O prazo é de até 24h após a confirmação do pagamento.",
+        ],
+        recentNorms,
+      ),
+    );
   }
 
-  if (started) {
-    messages.push("Seu pedido já está separado por aqui. Confirmando certinho o pagamento, sigo com a edição.");
+  // 3. Pergunta de qualidade ("vai ficar bom?").
+  if (quality) {
+    segments.push(
+      pickNonRepeating(
+        [
+          "Vou fazer com cuidado pra manter o rosto natural, sem deixar artificial.",
+          "Pode ficar tranquilo, faço com cuidado pra ficar natural.",
+        ],
+        recentNorms,
+      ),
+    );
   }
 
-  if ((deadline || paymentSent || messages.length === 0) && !messages.some((message) => /24h|24 horas/i.test(message))) {
-    messages.push("O prazo é de até 24h após a confirmação do pagamento.");
+  // 4. "Você já começou?".
+  if (started && segments.length < 3) {
+    segments.push(
+      pickNonRepeating(
+        [
+          "Seu pedido já está separado por aqui. Confirmando o pagamento, sigo com a edição.",
+          "Já deixei seu pedido separado. Assim que confirmar o pagamento, começo a edição.",
+        ],
+        recentNorms,
+      ),
+    );
   }
 
-  if (messages.length === 0) {
-    messages.push("Seu comprovante já está recebido por aqui. Estou conferindo os dados do pagamento.");
+  // Intenções sociais — só entram quando não há dúvida operacional acima.
+  if (segments.length === 0) {
+    if (payerName) {
+      segments.push(
+        "Sem problema, obrigado por avisar. Vou conferir os dados do comprovante certinho por aqui.",
+      );
+    } else if (moneyInAccount) {
+      segments.push("Boa 😄 vou conferir por aqui e já deixo seu pedido separado.");
+    } else if (morePhotos) {
+      segments.push(
+        "Perfeito. Pode separar sim, depois me manda por aqui que eu vejo pra você.",
+      );
+    } else if (referral) {
+      segments.push("Pode deixar, vou caprichar sim 🙏");
+    } else if (thanks) {
+      segments.push(
+        pickNonRepeating(
+          [
+            "Imagina, eu que agradeço. Vou acompanhando por aqui.",
+            "Que isso, tamo junto 🙏 sigo acompanhando por aqui.",
+          ],
+          recentNorms,
+        ),
+      );
+    } else if (shortAck) {
+      segments.push(
+        pickNonRepeating(
+          ["Tô por aqui 😊 qualquer coisa é só me chamar.", "👍", "Combinado 🙏"],
+          recentNorms,
+        ),
+      );
+    }
   }
 
-  return messages.slice(0, 3).join("\n\n");
+  // Fallback neutro — NUNCA o prazo por padrão.
+  if (segments.length === 0) {
+    segments.push(
+      pickNonRepeating(
+        [
+          "Seu comprovante já está aqui comigo, estou conferindo os dados do pagamento.",
+          "Tô com seu comprovante por aqui e conferindo o pagamento, qualquer novidade te aviso.",
+        ],
+        recentNorms,
+      ),
+    );
+  }
+
+  return dedupeRepeatedLines(segments).slice(0, 3).join("\n\n");
 }
 
 export function buildInvalidReceiptResponse(_context: SafetyContext = {}) {
   return "Recebi a imagem, mas pra confirmar preciso do comprovante com valor, data e recebedor visíveis. Pode me reenviar assim?";
+}
+
+// ── Áudio sem transcrição ──────────────────────────────────────────
+// Texto-marcador injetado em lib/webhook-helpers quando chega um áudio sem
+// legenda/transcrição. NUNCA inventar o conteúdo do áudio — pedir por escrito.
+export const AUDIO_PLACEHOLDER_TEXT = "Cliente enviou um áudio.";
+
+export function buildAudioClarificationResponse() {
+  return "Recebi seu áudio, mas pra não errar me confirma por escrito rapidinho?";
 }
 
 function ctaForContext(context: SafetyContext = {}) {
