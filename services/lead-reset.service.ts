@@ -26,7 +26,7 @@ class LeadResetService {
     const cleanPhone = normalizePhone(phone);
 
     return prisma.$transaction(async (tx) => {
-      const lead = await tx.lead.findUnique({
+      const lead = await tx.lead.findFirst({
         where: { phone: cleanPhone },
         include: {
           conversations: {

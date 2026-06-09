@@ -100,6 +100,7 @@ assert.equal(
 
 const promptValidation = validatePromptMaster({
   id: "test",
+  profileId: null,
   name: "Prompt teste",
   personality: "",
   tone: "",

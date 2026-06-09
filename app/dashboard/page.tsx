@@ -35,6 +35,7 @@ import { Button } from "@/components/ui/button";
 import { useConversations } from "@/hooks/use-conversations";
 import { useLeads } from "@/hooks/use-leads";
 import { useIntegrationsStatus } from "@/hooks/use-integrations";
+import { useProfiles } from "@/hooks/use-profiles";
 import { useAiPausedState, useToggleAiPause } from "@/hooks/use-ai-toggle";
 
 function isSameDay(a: Date, b: Date) {
@@ -54,11 +55,15 @@ export default function DashboardPage() {
   const { data: leads = [], isLoading: leadsLoading } = useLeads();
   const { data: conversations = [], isLoading: conversationsLoading } = useConversations();
   const { data: integrations } = useIntegrationsStatus();
+  const { data: profileContext } = useProfiles();
   const { data: aiState } = useAiPausedState();
   const toggleAi = useToggleAiPause();
 
   const loading = leadsLoading || conversationsLoading;
   const aiPaused = aiState?.aiPaused ?? false;
+  const activeProfile = profileContext?.activeProfile;
+  const profileAwaitingWhatsapp = activeProfile?.status === "AWAITING_WHATSAPP";
+  const profilePaused = activeProfile?.status === "PAUSED";
 
   const metrics = useMemo(() => {
     const today = new Date();
@@ -199,6 +204,11 @@ export default function DashboardPage() {
           <div>
             <div className="flex items-center gap-2">
               <h1>Central de Controle</h1>
+              {activeProfile && (
+                <Badge variant={profileAwaitingWhatsapp ? "warning" : "info"}>
+                  {activeProfile.name}
+                </Badge>
+              )}
               {allSetup ? (
                 <StatusBadge status="active" />
               ) : (
@@ -209,22 +219,24 @@ export default function DashboardPage() {
               )}
             </div>
             <p className="mt-1 text-sm text-zinc-500">
-              Visão geral da operação de atendimento via WhatsApp com IA.
+              {activeProfile
+                ? `Visão geral do perfil ${activeProfile.name}.`
+                : "Visão geral da operação de atendimento via WhatsApp com IA."}
             </p>
           </div>
           <div className="flex items-center gap-2">
-            {/* Botão de pausa global da IA */}
+            {/* Botão de pausa da IA do perfil ativo */}
             <Button
               size="sm"
               variant={aiPaused ? "success" : "destructive"}
               onClick={() => toggleAi.mutate()}
-              disabled={toggleAi.isPending}
+              disabled={toggleAi.isPending || profileAwaitingWhatsapp}
               className="min-w-[148px] justify-center"
-              aria-label={aiPaused ? "Reativar IA globalmente" : "Pausar IA globalmente"}
+              aria-label={aiPaused ? "Reativar IA do perfil" : "Pausar IA do perfil"}
               aria-pressed={aiPaused}
             >
               {aiPaused ? (
-                <><PlayCircle size={14} weight="duotone" aria-hidden="true" /> Reativar IA</>
+                <><PlayCircle size={14} weight="duotone" aria-hidden="true" /> Ativar IA</>
               ) : (
                 <><PauseCircle size={14} weight="duotone" aria-hidden="true" /> Pausar IA</>
               )}
@@ -254,9 +266,9 @@ export default function DashboardPage() {
                   <PauseCircle size={18} weight="duotone" className="text-amber-400" />
                 </div>
                 <div>
-                  <p className="text-sm font-semibold text-amber-300">IA pausada globalmente</p>
+                  <p className="text-sm font-semibold text-amber-300">IA pausada neste perfil</p>
                   <p className="text-xs text-amber-400/70">
-                    Todas as mensagens recebidas estão sendo salvas, mas a IA não está respondendo automaticamente.
+                    As mensagens continuam sendo salvas, mas a IA não responde automaticamente no perfil atual.
                   </p>
                 </div>
               </div>
@@ -264,12 +276,58 @@ export default function DashboardPage() {
                 size="sm"
                 variant="success"
                 onClick={() => toggleAi.mutate()}
-                disabled={toggleAi.isPending}
+                disabled={toggleAi.isPending || profileAwaitingWhatsapp}
                 className="shrink-0"
               >
                 <PlayCircle size={14} weight="duotone" />
                 Reativar IA
               </Button>
+            </div>
+          </Surface>
+        )}
+
+        {activeProfile && (
+          <Surface
+            variant="elevated"
+            padding="md"
+            className={profileAwaitingWhatsapp ? "border-amber-700/40" : undefined}
+          >
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p className="text-sm font-semibold text-zinc-200">{activeProfile.name}</p>
+                <p className="mt-1 text-xs text-zinc-500">
+                  {profileAwaitingWhatsapp
+                    ? "Perfil criado. WhatsApp ainda não conectado."
+                    : profilePaused
+                      ? "Perfil pronto, com IA pausada por padrão."
+                      : "Perfil em operação neste contexto."}
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <Badge variant={profileAwaitingWhatsapp ? "warning" : "default"}>
+                  WhatsApp {integrations?.checks?.evolutionConnected ? "conectado" : "pendente"}
+                </Badge>
+                <Badge variant={aiPaused ? "warning" : "success"}>
+                  IA {aiPaused ? "pausada" : "ativa"}
+                </Badge>
+              </div>
+            </div>
+          </Surface>
+        )}
+
+        {profileAwaitingWhatsapp && (
+          <Surface variant="elevated" padding="md">
+            <div className="flex items-start gap-3">
+              <div className="grid size-10 place-items-center rounded-xl bg-amber-500/10 ring-1 ring-amber-500/20">
+                <WhatsappLogo size={18} weight="duotone" className="text-amber-400" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-zinc-200">WhatsApp deste perfil ainda não conectado</p>
+                <p className="mt-1 text-xs leading-5 text-zinc-500">
+                  O perfil Música Personalizada já existe no app, mas ainda está aguardando o número dedicado.
+                  Assim que o WhatsApp for conectado, o dashboard, as conversas e a IA passam a operar nesse contexto.
+                </p>
+              </div>
             </div>
           </Surface>
         )}

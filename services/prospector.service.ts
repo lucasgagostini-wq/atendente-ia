@@ -11,6 +11,7 @@ type CreateProspectingJobInput = {
 type ImportProspectingLeadsInput = {
   jobId: string;
   leadIds: string[];
+  profileId: string;
 };
 
 type RawMapsItem = Record<string, unknown>;
@@ -287,8 +288,14 @@ class ProspectorService {
       let lead;
       if (normalizedPhone) {
         lead = await prisma.lead.upsert({
-          where: { phone: normalizedPhone },
+          where: {
+            profileId_phone: {
+              profileId: input.profileId,
+              phone: normalizedPhone,
+            },
+          },
           create: {
+            profileId: input.profileId,
             name: prospect.companyName,
             phone: normalizedPhone,
             source: "google_maps_prospector",
@@ -313,6 +320,7 @@ class ProspectorService {
       } else {
         lead = await prisma.lead.create({
           data: {
+            profileId: input.profileId,
             name: prospect.companyName,
             phone: `semfone-${prospect.id}`,
             source: "google_maps_prospector",

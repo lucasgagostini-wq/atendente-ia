@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { conversationSchema } from "@/lib/validations";
+import { getProfileSlugFromRequest } from "@/lib/profile-context";
 import { conversationService } from "@/services/conversation.service";
+import { profileService } from "@/services/profile.service";
 
 export const dynamic = "force-dynamic";
 
@@ -9,8 +11,12 @@ type Context = {
 };
 
 export async function GET(_: Request, context: Context) {
+  const activeProfile = await profileService.getProfileBySlug(
+    getProfileSlugFromRequest(_),
+  );
   const conversation = await conversationService.getConversationById(
     context.params.id,
+    activeProfile.id,
   );
 
   if (!conversation) {
@@ -25,6 +31,9 @@ export async function GET(_: Request, context: Context) {
 
 export async function PATCH(request: Request, context: Context) {
   try {
+    const activeProfile = await profileService.getProfileBySlug(
+      getProfileSlugFromRequest(request),
+    );
     const body = await request.json();
     const parsed = conversationSchema.partial().safeParse(body);
 
@@ -32,6 +41,18 @@ export async function PATCH(request: Request, context: Context) {
       return NextResponse.json(
         { error: parsed.error.flatten() },
         { status: 400 },
+      );
+    }
+
+    const currentConversation = await conversationService.getConversationById(
+      context.params.id,
+      activeProfile.id,
+    );
+
+    if (!currentConversation) {
+      return NextResponse.json(
+        { error: "Conversa não encontrada" },
+        { status: 404 },
       );
     }
 

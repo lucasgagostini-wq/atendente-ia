@@ -1,6 +1,7 @@
 "use client";
 
 import { apiRequest as request } from "@/lib/api-client";
+import { getClientProfileSlug } from "@/lib/profile-utils";
 import { useQuery } from "@tanstack/react-query";
 
 type IntegrationStatus = {
@@ -41,6 +42,16 @@ type IntegrationStatus = {
   prospector: {
     configured: boolean;
   };
+  profile?: {
+    id: string;
+    slug: string;
+    name: string;
+    status: string;
+    aiEnabled: boolean;
+    whatsappNumber: string | null;
+    whatsappSessionName: string | null;
+    usesSharedTransport: boolean;
+  };
   webhookUrl: string | null;
 };
 
@@ -79,7 +90,7 @@ async function getMergedIntegrationStatus() {
   const status = await request<IntegrationStatus>("/api/integrations/status");
   const localBridge = await getLocalBridgeHealth();
 
-  if (!localBridge?.connected) return status;
+  if (!localBridge?.connected || !status.profile?.usesSharedTransport) return status;
 
   const number = localBridge.ownerJid?.replace(/\D/g, "") || status.evolution.number;
 
@@ -108,8 +119,10 @@ async function getMergedIntegrationStatus() {
 }
 
 export function useIntegrationsStatus() {
+  const activeSlug = getClientProfileSlug();
+
   return useQuery({
-    queryKey: ["integrations-status"],
+    queryKey: ["integrations-status", activeSlug],
     queryFn: getMergedIntegrationStatus,
     refetchInterval: 8000,
   });

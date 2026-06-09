@@ -7,35 +7,45 @@
  */
 
 import { NextResponse } from "next/server";
+import { getProfileSlugFromRequest } from "@/lib/profile-context";
 import { prisma } from "@/lib/prisma";
-import { getSettings, invalidateSettingsCache } from "@/lib/settings-cache";
+import { profileService } from "@/services/profile.service";
 
 export const dynamic = "force-dynamic";
 
-export async function POST() {
+export async function POST(request: Request) {
   try {
-    const current = await getSettings();
-    const newState = !current.aiPaused;
+    const profile = await profileService.getProfileBySlug(
+      getProfileSlugFromRequest(request),
+    );
+    if (!profile.aiEnabled && profile.status === "AWAITING_WHATSAPP") {
+      return NextResponse.json(
+        { error: "Conecte o WhatsApp deste perfil antes de ativar a IA." },
+        { status: 412 },
+      );
+    }
+    const nextEnabled = !profile.aiEnabled;
 
-    await prisma.settings.update({
-      where: { id: "default" },
-      data: { aiPaused: newState },
-    });
-
-    // Força o cache a buscar o novo valor na próxima requisição
-    invalidateSettingsCache();
+    const updatedProfile = await profileService.setAiEnabled(profile.id, nextEnabled);
 
     await prisma.log.create({
       data: {
-        type: newState ? "AI_GLOBALLY_PAUSED" : "AI_GLOBALLY_RESUMED",
-        message: newState
-          ? "IA pausada globalmente pelo operador."
-          : "IA reativada globalmente pelo operador.",
-        payload: { aiPaused: newState },
+        type: nextEnabled ? "AI_PROFILE_RESUMED" : "AI_PROFILE_PAUSED",
+        message: nextEnabled
+          ? `IA reativada para o perfil ${updatedProfile.slug}.`
+          : `IA pausada para o perfil ${updatedProfile.slug}.`,
+        payload: {
+          profileId: updatedProfile.id,
+          profileSlug: updatedProfile.slug,
+          aiEnabled: updatedProfile.aiEnabled,
+        },
       },
     });
 
-    return NextResponse.json({ aiPaused: newState });
+    return NextResponse.json({
+      aiPaused: !updatedProfile.aiEnabled,
+      profile: updatedProfile,
+    });
   } catch (error) {
     return NextResponse.json(
       { error: "Falha ao alternar estado da IA", detail: error instanceof Error ? error.message : "erro desconhecido" },
@@ -44,7 +54,12 @@ export async function POST() {
   }
 }
 
-export async function GET() {
-  const settings = await getSettings();
-  return NextResponse.json({ aiPaused: settings.aiPaused ?? false });
+export async function GET(request: Request) {
+  const profile = await profileService.getProfileBySlug(
+    getProfileSlugFromRequest(request),
+  );
+  return NextResponse.json({
+    aiPaused: !profile.aiEnabled,
+    profile,
+  });
 }

@@ -18,6 +18,7 @@ import {
   useUpdateLead,
 } from "@/hooks/use-leads";
 import { useCreateTag, useTags } from "@/hooks/use-tags";
+import { useProfiles } from "@/hooks/use-profiles";
 import { formatPhone } from "@/lib/utils";
 import { Lead, Tag } from "@/types";
 import { Badge } from "@/components/ui/badge";
@@ -86,6 +87,7 @@ function toDraft(lead: Lead): LeadDraft {
 }
 
 export default function LeadsPage() {
+  const { data: profileContext } = useProfiles();
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState("ALL");
   const [statusFilter, setStatusFilter] = useState("ALL");
@@ -290,9 +292,14 @@ export default function LeadsPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1>Leads</h1>
+        <div className="flex flex-wrap items-center gap-2">
+          <h1>Leads</h1>
+          {profileContext?.activeProfile && (
+            <Badge variant="info">{profileContext.activeProfile.name}</Badge>
+          )}
+        </div>
         <p className="mt-1 text-sm text-zinc-400">
-          Edite dados manualmente e execute ações em massa com tags, status e estágio.
+          Edite dados manualmente e execute ações em massa dentro do perfil ativo.
         </p>
       </div>
 

@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
+import { getProfileSlugFromRequest } from "@/lib/profile-context";
 import { prisma } from "@/lib/prisma";
 import { evolutionService } from "@/services/evolution.service";
+import { profileService } from "@/services/profile.service";
 
 export const dynamic = "force-dynamic";
 
@@ -20,6 +22,9 @@ function isLocalWebhook(url: string) {
 }
 
 export async function GET(request: Request) {
+  const activeProfile = await profileService.getProfileBySlug(
+    getProfileSlugFromRequest(request),
+  );
   const settings = await prisma.settings.upsert({
     where: { id: "default" },
     update: {},
@@ -93,16 +98,28 @@ export async function GET(request: Request) {
   const fallbackModel = DEFAULT_FALLBACK_MODEL;
   const usingFreeModel = /:free\b/i.test(primaryModel) || /:free\b/i.test(fallbackModel);
 
+  const profileAwaitingWhatsapp = activeProfile.status === "AWAITING_WHATSAPP";
+  const profileDisconnected = activeProfile.status === "DISCONNECTED";
+  const profileEvolutionConfigured = profileAwaitingWhatsapp
+    ? false
+    : evolutionConfigured;
+  const profileEvolutionConnected =
+    profileEvolutionConfigured &&
+    !profileDisconnected &&
+    Boolean(evolutionStatus.connected);
+
   const checks = {
-    evolutionConfigured,
-    evolutionConnected: Boolean(evolutionStatus.connected),
+    evolutionConfigured: profileEvolutionConfigured,
+    evolutionConnected: profileEvolutionConnected,
     webhookConfigured: Boolean(webhookUrl),
     openRouterConfigured: Boolean(openRouterApiKey),
     apifyConfigured: Boolean(apifyApiToken),
   };
 
   const missing: string[] = [];
-  if (!checks.evolutionConfigured) {
+  if (profileAwaitingWhatsapp) {
+    missing.push("WhatsApp deste perfil ainda não conectado");
+  } else if (!checks.evolutionConfigured) {
     missing.push("Evolution API URL/API Key/Instance Name");
   }
   if (checks.evolutionConfigured && !checks.evolutionConnected) {
@@ -119,10 +136,20 @@ export async function GET(request: Request) {
     checks,
     missing,
     evolution: {
-      configured: evolutionConfigured,
-      connected: evolutionStatus.connected,
-      number: evolutionStatus.number ?? null,
+      configured: profileEvolutionConfigured,
+      connected: profileEvolutionConnected,
+      number: activeProfile.whatsappNumber || evolutionStatus.number || null,
       raw: evolutionStatus.raw ?? null,
+    },
+    profile: {
+      id: activeProfile.id,
+      slug: activeProfile.slug,
+      name: activeProfile.name,
+      status: activeProfile.status,
+      aiEnabled: activeProfile.aiEnabled,
+      whatsappNumber: activeProfile.whatsappNumber,
+      whatsappSessionName: activeProfile.whatsappSessionName,
+      usesSharedTransport: activeProfile.slug === "restauracao-fotos",
     },
     ai: {
       configured: Boolean(openRouterApiKey),

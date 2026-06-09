@@ -9,6 +9,7 @@ import { prisma } from "@/lib/prisma";
 import { leadService } from "@/services/lead.service";
 
 type ConversationFilters = {
+  profileId?: string;
   search?: string;
   status?: ConversationStatus;
   stage?: string;
@@ -21,6 +22,15 @@ class ConversationService {
     const and: Prisma.ConversationWhereInput[] = [];
 
     if (filters.status) and.push({ status: filters.status });
+    if (filters.profileId) {
+      and.push({
+        lead: {
+          is: {
+            profileId: filters.profileId,
+          },
+        },
+      });
+    }
     if (filters.stage) {
       and.push({
         lead: {
@@ -51,6 +61,7 @@ class ConversationService {
         lead: {
           include: {
             leadTags: { include: { tag: true } },
+            profile: true,
           },
         },
         messages: {
@@ -64,13 +75,25 @@ class ConversationService {
     });
   }
 
-  async getConversationById(id: string) {
-    return prisma.conversation.findUnique({
-      where: { id },
+  async getConversationById(id: string, profileId?: string) {
+    return prisma.conversation.findFirst({
+      where: {
+        id,
+        ...(profileId
+          ? {
+              lead: {
+                is: {
+                  profileId,
+                },
+              },
+            }
+          : {}),
+      },
       include: {
         lead: {
           include: {
             leadTags: { include: { tag: true } },
+            profile: true,
           },
         },
         messages: {

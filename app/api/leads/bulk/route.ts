@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { leadsBulkSchema } from "@/lib/validations";
+import { getProfileSlugFromRequest } from "@/lib/profile-context";
 import { leadService } from "@/services/lead.service";
+import { profileService } from "@/services/profile.service";
 
 export const dynamic = "force-dynamic";
 
@@ -11,6 +13,9 @@ function toNullable(value?: string | null) {
 
 export async function POST(request: Request) {
   try {
+    const activeProfile = await profileService.getProfileBySlug(
+      getProfileSlugFromRequest(request),
+    );
     const body = await request.json();
     const parsed = leadsBulkSchema.safeParse(body);
 
@@ -59,6 +64,7 @@ export async function POST(request: Request) {
     }
 
     const result = await leadService.runBulkAction({
+      profileId: activeProfile.id,
       leadIds: input.leadIds,
       action: input.action,
       tagIds: input.tagIds,
@@ -81,4 +87,3 @@ export async function POST(request: Request) {
     );
   }
 }
-

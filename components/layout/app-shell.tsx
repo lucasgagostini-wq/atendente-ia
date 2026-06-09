@@ -10,6 +10,8 @@ import {
   TerminalWindow,
 } from "@phosphor-icons/react";
 import { AdminCommandPalette } from "@/components/admin-console/admin-command-palette";
+import { ProfileSwitcher } from "@/components/layout/profile-switcher";
+import { buildProfileHref, getClientProfileSlug } from "@/lib/profile-utils";
 import { cn } from "@/lib/utils";
 import { buildBreadcrumbItems, getPageContext, navGroups } from "@/lib/navigation";
 
@@ -23,6 +25,7 @@ export function AppShell({ children }: Props) {
   const breadcrumbItems = buildBreadcrumbItems(pathname);
   const siblingItems = pageContext.group?.items ?? [];
   const showBack = !isPublicPage && pathname !== "/dashboard";
+  const activeProfileSlug = getClientProfileSlug();
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -35,7 +38,7 @@ export function AppShell({ children }: Props) {
       return;
     }
 
-    router.push("/dashboard");
+    router.push(buildProfileHref("/dashboard", activeProfileSlug));
   }
 
   if (isPublicPage) return <>{children}</>;
@@ -77,7 +80,7 @@ export function AppShell({ children }: Props) {
                     return (
                       <Link
                         key={item.href}
-                        href={item.href}
+                        href={buildProfileHref(item.href, activeProfileSlug)}
                         className={cn(
                           "group relative flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm transition-all duration-150",
                           active
@@ -149,7 +152,10 @@ export function AppShell({ children }: Props) {
                         <div key={`${item.label}-${index}`} className="flex items-center gap-1.5">
                           {index > 0 && <span className="text-zinc-700">/</span>}
                           {item.href ? (
-                            <Link href={item.href} className="transition-colors hover:text-zinc-300">
+                            <Link
+                              href={buildProfileHref(item.href, activeProfileSlug)}
+                              className="transition-colors hover:text-zinc-300"
+                            >
                               {item.label}
                             </Link>
                           ) : (
@@ -165,6 +171,9 @@ export function AppShell({ children }: Props) {
                 </div>
 
                 <div className="flex items-center gap-2">
+                  <div className="hidden xl:block">
+                    <ProfileSwitcher />
+                  </div>
                   <div className="flex items-center gap-1.5 rounded-lg border border-zinc-800/60 bg-zinc-900/50 px-2.5 py-1.5 text-[11px] font-medium text-zinc-500">
                     <span className="size-1.5 rounded-full bg-emerald-400 status-pulse" />
                     {(process.env.NEXT_PUBLIC_APP_URL ?? "").includes("localhost") ? "local" : "produção"}
@@ -189,6 +198,9 @@ export function AppShell({ children }: Props) {
               </div>
 
               <div className="flex items-center gap-2 overflow-x-auto pb-0.5 scrollbar-thin">
+                <div className="xl:hidden">
+                  <ProfileSwitcher />
+                </div>
                 {showBack && (
                   <button
                     onClick={goBack}
@@ -208,7 +220,7 @@ export function AppShell({ children }: Props) {
                   return (
                     <Link
                       key={item.href}
-                      href={item.href}
+                      href={buildProfileHref(item.href, activeProfileSlug)}
                       className={cn(
                         "flex shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs transition-all",
                         active

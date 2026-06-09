@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
+import { getProfileSlugFromRequest } from "@/lib/profile-context";
 import { prospectorImportSchema } from "@/lib/validations";
+import { profileService } from "@/services/profile.service";
 import { prospectorService } from "@/services/prospector.service";
 
 export const dynamic = "force-dynamic";
@@ -11,6 +13,9 @@ type Context = {
 
 export async function POST(request: Request, context: Context) {
   try {
+    const activeProfile = await profileService.getProfileBySlug(
+      getProfileSlugFromRequest(request),
+    );
     const body = await request.json();
     const parsed = prospectorImportSchema.safeParse(body);
 
@@ -24,6 +29,7 @@ export async function POST(request: Request, context: Context) {
     const result = await prospectorService.importProspectingLeadsToCrm({
       jobId: context.params.id,
       leadIds: parsed.data.leadIds,
+      profileId: activeProfile.id,
     });
 
     return NextResponse.json(result);

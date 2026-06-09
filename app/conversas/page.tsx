@@ -25,7 +25,10 @@ import {
   useConversations,
   useUpdateConversation,
 } from "@/hooks/use-conversations";
+import { useAiPausedState, useToggleAiPause } from "@/hooks/use-ai-toggle";
+import { useIntegrationsStatus } from "@/hooks/use-integrations";
 import { useUpdateLead } from "@/hooks/use-leads";
+import { useProfiles } from "@/hooks/use-profiles";
 import { formatPhone } from "@/lib/utils";
 import { formatRelativeConversationTime } from "@/lib/relative-time";
 import { useAppStore } from "@/store/app-store";
@@ -236,6 +239,10 @@ function MessageAttachment({ message }: { message: Message }) {
 
 export default function ConversasPage() {
   const { data: conversations = [], isLoading } = useConversations();
+  const { data: profileContext } = useProfiles();
+  const { data: integrations } = useIntegrationsStatus();
+  const { data: aiState } = useAiPausedState();
+  const toggleProfileAi = useToggleAiPause();
   const { selectedConversationId, setSelectedConversationId } = useAppStore();
   const [search, setSearch] = useState("");
   const [stageFilter, setStageFilter] = useState<string>("ALL");
@@ -362,8 +369,46 @@ export default function ConversasPage() {
     { value: "CUSTOMER", label: "Cliente" },
   ];
 
+  const activeProfile = profileContext?.activeProfile;
+  const aiPaused = aiState?.aiPaused ?? false;
+  const whatsappConnected = integrations?.checks?.evolutionConnected ?? false;
+
   return (
-    <div className="flex h-[calc(100vh-120px)] gap-3 overflow-hidden">
+    <div className="space-y-3">
+      {activeProfile && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-zinc-800/70 bg-zinc-900/60 px-4 py-3 shadow-card">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-lg font-semibold text-zinc-100">{activeProfile.name}</h1>
+              <Badge variant={activeProfile.status === "AWAITING_WHATSAPP" ? "warning" : "info"}>
+                {activeProfile.status === "AWAITING_WHATSAPP" ? "Aguardando WhatsApp" : activeProfile.status}
+              </Badge>
+              <Badge variant={whatsappConnected ? "success" : "warning"}>
+                WhatsApp {whatsappConnected ? "conectado" : "pendente"}
+              </Badge>
+              <Badge variant={aiPaused ? "warning" : "success"}>
+                IA {aiPaused ? "pausada" : "ativa"}
+              </Badge>
+            </div>
+            <p className="mt-1 text-xs text-zinc-500">
+              {activeProfile.status === "AWAITING_WHATSAPP"
+                ? "Esse perfil já existe no app, mas ainda não tem um WhatsApp dedicado conectado."
+                : "As conversas abaixo pertencem somente ao perfil ativo."}
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant={aiPaused ? "success" : "outline"}
+            onClick={() => toggleProfileAi.mutate()}
+            disabled={toggleProfileAi.isPending || activeProfile.status === "AWAITING_WHATSAPP"}
+          >
+            {aiPaused ? <Zap className="size-3.5" /> : <ZapOff className="size-3.5" />}
+            {aiPaused ? "Ativar IA do perfil" : "Pausar IA do perfil"}
+          </Button>
+        </div>
+      )}
+
+      <div className="flex h-[calc(100vh-176px)] gap-3 overflow-hidden">
 
       {/* ── Conversation list ──────────────────────────── */}
       <div className="flex w-[300px] shrink-0 flex-col overflow-hidden rounded-xl border border-zinc-800/70 bg-zinc-900/60 shadow-card">
@@ -746,6 +791,7 @@ export default function ConversasPage() {
             </form>
           </>
         )}
+      </div>
       </div>
     </div>
   );

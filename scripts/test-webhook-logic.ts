@@ -96,6 +96,7 @@ test("retorna null para payload sem texto e sem imagem", () => {
 test("parseia mensagem de texto simples (formato Baileys bridge)", () => {
   const result = extractIncomingPayload({
     data: {
+      profileSlug: "restauracao-fotos",
       key: { remoteJid: "5519999111111@s.whatsapp.net", fromMe: false, id: "msg001" },
       message: { conversation: "  quanto custa?  " },
       phone: "5519999111111",
@@ -108,6 +109,7 @@ test("parseia mensagem de texto simples (formato Baileys bridge)", () => {
   assert.equal(result!.phone, "5519999111111");
   assert.equal(result!.messageId, "msg001");
   assert.equal(result!.replyTransport, "baileys_bridge");
+  assert.equal(result!.profileSlug, "restauracao-fotos");
 });
 
 test("parseia imageMessage sem caption como 'foto para restaurar'", () => {
@@ -183,6 +185,7 @@ test("parseia stickerMessage com placeholder de sticker", () => {
 test("parseia mensagem outbound/manual (fromMe=true) para sincronizar no painel", () => {
   const result = extractOutgoingPayload({
     data: {
+      profileSlug: "musica-personalizada",
       key: { remoteJid: "5519999111111@s.whatsapp.net", fromMe: true, id: "out001" },
       message: { conversation: "te respondi por aqui" },
       phone: "5519999111111",
@@ -192,6 +195,7 @@ test("parseia mensagem outbound/manual (fromMe=true) para sincronizar no painel"
   assert.equal(result!.type, "TEXT");
   assert.equal(result!.mediaKind, "TEXT");
   assert.equal(result!.text, "te respondi por aqui");
+  assert.equal(result!.profileSlug, "musica-personalizada");
 });
 
 test("normaliza telefone removendo caracteres não-numéricos do JID", () => {

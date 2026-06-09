@@ -39,7 +39,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const prompt = await promptService.getActivePrompt();
+    const prompt = await promptService.getActivePrompt(conversation.lead.profileId ?? undefined);
     const recentHistory = await conversationService.getRecentHistory(
       conversation.id,
       14,
@@ -48,6 +48,7 @@ export async function POST(request: Request) {
       prompt,
       lead: conversation.lead,
       recentHistory,
+      profile: conversation.lead.profile ?? null,
     });
     const promptValidation = validatePromptMaster(prompt);
 

@@ -1,4 +1,5 @@
 import { PrismaClient } from "@prisma/client";
+import { PROFILE_DEFAULTS, buildDefaultPromptForProfile } from "../lib/profile-defaults";
 
 const prisma = new PrismaClient();
 
@@ -40,42 +41,60 @@ async function main() {
     },
   });
 
+  const restorationProfile = await prisma.profile.upsert({
+    where: { slug: PROFILE_DEFAULTS.restoration.slug },
+    update: {
+      name: PROFILE_DEFAULTS.restoration.name,
+      description: PROFILE_DEFAULTS.restoration.description,
+      status: PROFILE_DEFAULTS.restoration.status,
+      aiEnabled: PROFILE_DEFAULTS.restoration.aiEnabled,
+      pixKey: PROFILE_DEFAULTS.restoration.pixKey,
+      pixName: PROFILE_DEFAULTS.restoration.pixName,
+      pixBank: PROFILE_DEFAULTS.restoration.pixBank,
+      whatsappSessionName: process.env.EVOLUTION_INSTANCE_NAME ?? undefined,
+    },
+    create: {
+      name: PROFILE_DEFAULTS.restoration.name,
+      slug: PROFILE_DEFAULTS.restoration.slug,
+      description: PROFILE_DEFAULTS.restoration.description,
+      status: PROFILE_DEFAULTS.restoration.status,
+      aiEnabled: PROFILE_DEFAULTS.restoration.aiEnabled,
+      pixKey: PROFILE_DEFAULTS.restoration.pixKey,
+      pixName: PROFILE_DEFAULTS.restoration.pixName,
+      pixBank: PROFILE_DEFAULTS.restoration.pixBank,
+      whatsappSessionName: process.env.EVOLUTION_INSTANCE_NAME ?? undefined,
+    },
+  });
+
+  const musicProfile = await prisma.profile.upsert({
+    where: { slug: PROFILE_DEFAULTS.music.slug },
+    update: {
+      name: PROFILE_DEFAULTS.music.name,
+      description: PROFILE_DEFAULTS.music.description,
+      status: PROFILE_DEFAULTS.music.status,
+      aiEnabled: PROFILE_DEFAULTS.music.aiEnabled,
+    },
+    create: {
+      name: PROFILE_DEFAULTS.music.name,
+      slug: PROFILE_DEFAULTS.music.slug,
+      description: PROFILE_DEFAULTS.music.description,
+      status: PROFILE_DEFAULTS.music.status,
+      aiEnabled: PROFILE_DEFAULTS.music.aiEnabled,
+    },
+  });
+
   await prisma.prompt.deleteMany();
   await prisma.prompt.create({
     data: {
-      name: "Restauração de Fotos",
-      personality:
-        "Voce e uma atendente brasileira de WhatsApp para restauracao de fotos antigas. Parece uma pessoa real, acolhedora, simples e natural.",
-      tone: "humano, curto, acolhedor, emocional, brasileiro e informal na medida certa",
-      goal:
-        "Acolher o cliente, pedir a foto, criar confianca e conduzir para o pagamento via PIX.",
-      rules: [
-        "responda sempre em português brasileiro",
-        "escreva mensagens curtas, como WhatsApp real",
-        "nunca faça textos longos",
-        "faça uma pergunta por vez",
-        "acolha antes de vender",
-        "peça a foto cedo",
-        "não peça resolução, tamanho, dimensões ou especificações técnicas",
-        "não ofereça prévia, teste grátis ou demonstração antes do pagamento",
-        "quando houver intenção clara, conduza para o PIX",
-        "se a pessoa pedir humano, pause a IA",
-        "se não souber algo, diga que vai confirmar",
-        "não invente informações",
-        "não diga que é IA",
-        "não use emojis em excesso",
-      ].join("\n"),
-      faq:
-        "O cliente pode mandar a foto pelo WhatsApp. A restauracao comeca apos pagamento confirmado. Cada foto e tratada com cuidado individual.",
-      objections:
-        "Se pedir previa, explique que o trabalho comeca apos pagamento porque exige tempo e cuidado individual. Se tiver medo do resultado, acolha e tranquilize.",
-      offer:
-        "Restauracao de fotos antigas, rasgadas, manchadas, apagadas ou danificadas. A opcao de 1 foto fica R$ 9,99.",
+      profileId: restorationProfile.id,
+      ...buildDefaultPromptForProfile(PROFILE_DEFAULTS.restoration.slug),
       checkoutUrl: process.env.DEFAULT_CHECKOUT_URL ?? "",
-      transferTriggers:
-        "Pedir humano, reclamacao forte, problema de pagamento.",
-      cta: "Quer que eu te mande o PIX?",
-      isActive: true,
+    },
+  });
+  await prisma.prompt.create({
+    data: {
+      profileId: musicProfile.id,
+      ...buildDefaultPromptForProfile(PROFILE_DEFAULTS.music.slug),
     },
   });
 

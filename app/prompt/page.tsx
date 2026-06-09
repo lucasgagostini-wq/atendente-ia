@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Save } from "lucide-react";
 import { toast } from "sonner";
+import { getClientProfileSlug } from "@/lib/profile-utils";
 import { Prompt } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -25,10 +26,11 @@ async function request<T>(input: RequestInfo | URL, init?: RequestInit): Promise
 
 export default function PromptPage() {
   const queryClient = useQueryClient();
+  const activeSlug = getClientProfileSlug();
   const [form, setForm] = useState<Partial<Prompt>>({});
 
   const promptQuery = useQuery({
-    queryKey: ["prompt"],
+    queryKey: ["prompt", activeSlug],
     queryFn: () => request<Prompt>("/api/prompt"),
   });
 
@@ -46,7 +48,10 @@ export default function PromptPage() {
       }),
     onSuccess: async () => {
       toast.success("Prompt master atualizado.");
-      await queryClient.invalidateQueries({ queryKey: ["prompt"] });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ["prompt", activeSlug] }),
+        queryClient.invalidateQueries({ queryKey: ["profiles"] }),
+      ]);
     },
   });
 
@@ -153,4 +158,3 @@ export default function PromptPage() {
     </div>
   );
 }
-

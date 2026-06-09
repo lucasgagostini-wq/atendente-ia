@@ -55,6 +55,13 @@ enum ProspectingJobStatus {
   FAILED
 }
 
+enum ProfileStatus {
+  ACTIVE
+  PAUSED
+  AWAITING_WHATSAPP
+  DISCONNECTED
+}
+
 model User {
   id           String   @id @default(cuid())
   name         String
@@ -64,10 +71,33 @@ model User {
   updatedAt    DateTime @updatedAt
 }
 
+model Profile {
+  id                  String        @id @default(cuid())
+  name                String
+  slug                String        @unique
+  description         String?
+  status              ProfileStatus @default(ACTIVE)
+  aiEnabled           Boolean       @default(false)
+  whatsappNumber      String?
+  whatsappSessionName String?
+  pixKey              String?
+  pixName             String?
+  pixBank             String?
+  promptConfig        Json?
+  settings            Json?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+  leads               Lead[]
+  prompts             Prompt[]
+
+  @@index([status])
+}
+
 model Lead {
   id             String         @id @default(cuid())
+  profileId       String?
   name           String?
-  phone          String         @unique
+  phone          String
   status         LeadStatus     @default(NEW)
   funnelStage    FunnelStage    @default(COLD)
   source         String?
@@ -80,10 +110,14 @@ model Lead {
   lastMessageAt  DateTime?
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
+  profile        Profile?       @relation(fields: [profileId], references: [id], onDelete: SetNull)
   conversations  Conversation[]
   messages       Message[]
   leadTags       LeadTag[]
   prospectingEntries ProspectingLead[] @relation("ImportedProspectingLead")
+
+  @@unique([profileId, phone])
+  @@index([profileId, lastMessageAt])
 }
 
 model Conversation {
@@ -118,6 +152,7 @@ model Message {
 
 model Prompt {
   id               String   @id @default(cuid())
+  profileId        String?
   name             String   @default("Prompt Principal")
   personality      String
   tone             String
@@ -132,6 +167,9 @@ model Prompt {
   isActive         Boolean  @default(true)
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
+  profile          Profile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
+
+  @@index([profileId, isActive])
 }
 
 model Automation {

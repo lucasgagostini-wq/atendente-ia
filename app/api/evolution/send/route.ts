@@ -1,13 +1,18 @@
 import { NextResponse } from "next/server";
+import { getProfileSlugFromRequest } from "@/lib/profile-context";
 import { evolutionSendSchema } from "@/lib/validations";
 import { conversationService } from "@/services/conversation.service";
 import { evolutionService } from "@/services/evolution.service";
 import { leadService } from "@/services/lead.service";
+import { profileService } from "@/services/profile.service";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   try {
+    const activeProfile = await profileService.getProfileBySlug(
+      getProfileSlugFromRequest(request),
+    );
     const body = await request.json();
     const parsed = evolutionSendSchema.safeParse(body);
 
@@ -18,7 +23,14 @@ export async function POST(request: Request) {
       );
     }
 
-    const lead = await leadService.upsertByPhone(parsed.data.phone);
+    if (activeProfile.status === "AWAITING_WHATSAPP") {
+      return NextResponse.json(
+        { error: "Perfil ainda sem WhatsApp conectado" },
+        { status: 412 },
+      );
+    }
+
+    const lead = await leadService.upsertByPhone(parsed.data.phone, undefined, activeProfile.id);
     const conversation = await conversationService.getOrCreateOpenConversation(
       lead.id,
     );

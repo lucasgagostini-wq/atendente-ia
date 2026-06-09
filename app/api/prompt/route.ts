@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
+import { getProfileSlugFromRequest } from "@/lib/profile-context";
 import { promptSchema } from "@/lib/validations";
 import { promptService } from "@/services/prompt.service";
+import { profileService } from "@/services/profile.service";
 
 export const dynamic = "force-dynamic";
 
@@ -9,13 +11,19 @@ function toNullable(value?: string | null) {
   return value === "" ? null : value;
 }
 
-export async function GET() {
-  const prompt = await promptService.getPrompt();
+export async function GET(request: Request) {
+  const activeProfile = await profileService.getProfileBySlug(
+    getProfileSlugFromRequest(request),
+  );
+  const prompt = await promptService.getPrompt(activeProfile.id);
   return NextResponse.json(prompt);
 }
 
 export async function PATCH(request: Request) {
   try {
+    const activeProfile = await profileService.getProfileBySlug(
+      getProfileSlugFromRequest(request),
+    );
     const body = await request.json();
     const parsed = promptSchema.partial().safeParse(body);
 
@@ -29,7 +37,7 @@ export async function PATCH(request: Request) {
     const prompt = await promptService.updatePrompt({
       ...parsed.data,
       checkoutUrl: toNullable(parsed.data.checkoutUrl),
-    });
+    }, activeProfile.id);
 
     return NextResponse.json(prompt);
   } catch (error) {

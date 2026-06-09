@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { getClientProfileSlug } from "@/lib/profile-utils";
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -14,8 +15,10 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 
 /** Estado atual da pausa global da IA */
 export function useAiPausedState() {
+  const activeSlug = getClientProfileSlug();
+
   return useQuery({
-    queryKey: ["ai-paused"],
+    queryKey: ["ai-paused", activeSlug],
     queryFn: () => request<{ aiPaused: boolean }>("/api/settings/ai-toggle"),
     refetchInterval: 10_000,
   });
@@ -24,13 +27,15 @@ export function useAiPausedState() {
 /** Alterna pausa/ativa da IA globalmente */
 export function useToggleAiPause() {
   const queryClient = useQueryClient();
+  const activeSlug = getClientProfileSlug();
 
   return useMutation({
     mutationFn: () =>
       request<{ aiPaused: boolean }>("/api/settings/ai-toggle", { method: "POST" }),
     onSuccess: (data) => {
-      queryClient.setQueryData(["ai-paused"], data);
+      queryClient.setQueryData(["ai-paused", activeSlug], data);
       queryClient.invalidateQueries({ queryKey: ["integrations-status"] });
+      queryClient.invalidateQueries({ queryKey: ["profiles"] });
     },
   });
 }

@@ -6,6 +6,7 @@ export type MessageRole = "LEAD" | "ASSISTANT" | "HUMAN" | "SYSTEM";
 export type MessageType = "TEXT" | "IMAGE" | "AUDIO";
 export type MessageMediaKind = "TEXT" | "IMAGE" | "AUDIO" | "DOCUMENT" | "VIDEO" | "STICKER";
 export type ProspectingJobStatus = "QUEUED" | "RUNNING" | "COMPLETED" | "FAILED";
+export type ProfileStatus = "ACTIVE" | "PAUSED" | "AWAITING_WHATSAPP" | "DISCONNECTED";
 
 export type MessageMediaMetadata = {
   kind?: MessageMediaKind;
@@ -26,6 +27,7 @@ export type MessageMetadata = Record<string, unknown> & {
 
 export type Lead = {
   id: string;
+  profileId: string | null;
   name: string | null;
   phone: string;
   status: LeadStatus;
@@ -46,6 +48,7 @@ export type Lead = {
     tagId: string;
     tag: Tag;
   }>;
+  profile?: Profile | null;
 };
 
 export type Conversation = {
@@ -72,6 +75,7 @@ export type Message = {
 
 export type Prompt = {
   id: string;
+  profileId?: string | null;
   name: string;
   personality: string;
   tone: string;
@@ -86,6 +90,28 @@ export type Prompt = {
   isActive: boolean;
   createdAt: string;
   updatedAt: string;
+};
+
+export type Profile = {
+  id: string;
+  name: string;
+  slug: string;
+  description: string | null;
+  status: ProfileStatus;
+  aiEnabled: boolean;
+  whatsappNumber: string | null;
+  whatsappSessionName: string | null;
+  pixKey: string | null;
+  pixName: string | null;
+  pixBank: string | null;
+  promptConfig?: Record<string, unknown> | null;
+  settings?: Record<string, unknown> | null;
+  createdAt: string;
+  updatedAt: string;
+  _count?: {
+    leads: number;
+    prompts: number;
+  };
 };
 
 export type Automation = {

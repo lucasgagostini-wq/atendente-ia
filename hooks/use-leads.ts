@@ -1,6 +1,7 @@
 "use client";
 
 import { apiRequest as request } from "@/lib/api-client";
+import { getClientProfileSlug } from "@/lib/profile-utils";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Lead } from "@/types";
 
@@ -28,16 +29,20 @@ function buildLeadsQuery(filters: LeadsFilters = {}) {
 }
 
 export function useLeads(filters: LeadsFilters = {}, options?: { enabled?: boolean }) {
+  const activeSlug = getClientProfileSlug();
+
   return useQuery({
-    queryKey: ["leads", filters],
+    queryKey: ["leads", activeSlug, filters],
     queryFn: () => request<Lead[]>(buildLeadsQuery(filters)),
     enabled: options?.enabled ?? true,
   });
 }
 
 export function useLead(id?: string) {
+  const activeSlug = getClientProfileSlug();
+
   return useQuery({
-    queryKey: ["lead", id],
+    queryKey: ["lead", activeSlug, id],
     queryFn: () => request<Lead>(`/api/leads/${id}`),
     enabled: Boolean(id),
   });
@@ -45,6 +50,7 @@ export function useLead(id?: string) {
 
 export function useUpdateLead() {
   const queryClient = useQueryClient();
+  const activeSlug = getClientProfileSlug();
 
   return useMutation({
     mutationFn: (args: { id: string; body: Record<string, unknown> }) =>
@@ -55,7 +61,7 @@ export function useUpdateLead() {
     onSuccess: async (_, variables) => {
       await Promise.all([
         queryClient.invalidateQueries({ queryKey: ["leads"] }),
-        queryClient.invalidateQueries({ queryKey: ["lead", variables.id] }),
+        queryClient.invalidateQueries({ queryKey: ["lead", activeSlug, variables.id] }),
         queryClient.invalidateQueries({ queryKey: ["tags"] }),
       ]);
     },

@@ -1,32 +1,27 @@
-import { Lead, Prompt } from "@prisma/client";
+import { Lead, Profile, Prompt } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { buildDefaultPromptForProfile } from "@/lib/profile-defaults";
+import { profileService } from "@/services/profile.service";
 
 class PromptService {
-  async getPrompt() {
+  async getPrompt(profileId?: string) {
+    await profileService.ensureDefaultProfiles();
+
     const prompt = await prisma.prompt.findFirst({
+      where: profileId ? { profileId } : undefined,
       orderBy: { updatedAt: "desc" },
     });
 
     if (!prompt) {
+      const profile = profileId
+        ? await prisma.profile.findUnique({ where: { id: profileId } })
+        : await profileService.getDefaultProfile();
+      const promptSeed = buildDefaultPromptForProfile(profile?.slug ?? "restauracao-fotos");
+
       return prisma.prompt.create({
         data: {
-          name: "Restauração de Fotos",
-          personality:
-            "Voce e uma atendente brasileira de WhatsApp para um servico de restauracao de fotos antigas. Parece uma pessoa real, acolhedora e simples.",
-          tone: "humano, curto, natural, acolhedor, brasileiro e informal na medida certa",
-          goal:
-            "Acolher o cliente, pedir a foto, criar confianca e conduzir com naturalidade para o pagamento via PIX.",
-          rules:
-            "Responda curto. Nunca peca resolucao, tamanho, dimensoes ou detalhes tecnicos. Nunca ofereca previa gratis. Nao diga que e IA ou robo.",
-          faq:
-            "O cliente pode mandar a foto pelo WhatsApp. A restauracao comeca depois do pagamento confirmado. O trabalho e feito com cuidado, foto por foto.",
-          objections:
-            "Se pedir previa, explique de forma humana que o trabalho so comeca apos pagamento porque cada foto exige tempo. Se tiver medo de ficar ruim, acolha e diga que faz com cuidado.",
-          offer:
-            "Restauracao de fotos antigas, rasgadas, manchadas ou apagadas. A opcao de 1 foto fica R$ 9,99. Conduza para o PIX sem parecer forcado.",
-          transferTriggers: "Pedido explicito por humano, reclamacao forte, problema de pagamento.",
-          cta: "Quer que eu te mande o PIX?",
-          isActive: true,
+          profileId: profile?.id,
+          ...promptSeed,
         },
       });
     }
@@ -34,18 +29,21 @@ class PromptService {
     return prompt;
   }
 
-  async getActivePrompt() {
+  async getActivePrompt(profileId?: string) {
     const activePrompt = await prisma.prompt.findFirst({
-      where: { isActive: true },
+      where: {
+        isActive: true,
+        ...(profileId ? { profileId } : undefined),
+      },
       orderBy: { updatedAt: "desc" },
     });
 
     if (activePrompt) return activePrompt;
-    return this.getPrompt();
+    return this.getPrompt(profileId);
   }
 
-  async updatePrompt(data: Partial<Prompt>) {
-    const current = await this.getPrompt();
+  async updatePrompt(data: Partial<Prompt>, profileId?: string) {
+    const current = await this.getPrompt(profileId);
 
     return prisma.prompt.update({
       where: { id: current.id },
@@ -57,22 +55,29 @@ class PromptService {
     prompt: Prompt;
     lead: Lead;
     recentHistory: string[];
+    profile?: Profile | null;
   }) {
-    const { prompt, lead, recentHistory } = args;
+    const { prompt, lead, recentHistory, profile } = args;
 
-    return this.compactPromptMaster({ prompt, lead, recentHistory });
+    return this.compactPromptMaster({ prompt, lead, recentHistory, profile });
   }
 
   compactPromptMaster(args: {
     prompt: Prompt;
     lead: Lead;
     recentHistory: string[];
+    profile?: Profile | null;
   }) {
-    const { prompt, lead, recentHistory } = args;
+    const { prompt, lead, recentHistory, profile } = args;
+    const pixKey = profile?.pixKey ?? "estudiofotos000@gmail.com";
+    const pixName = profile?.pixName ?? "Lucas Agostini";
+    const pixBank = profile?.pixBank ?? "Nubank";
+    const profileOfferName = profile?.name ?? "Restauração de Fotos";
+    const profileDescription = profile?.description ?? "Oferta principal ativa.";
 
     return `
 IDENTIDADE:
-- Voce e Camila, atendente humana brasileira de WhatsApp de um estudio de restauracao de fotos.
+- Voce e Camila, atendente humana brasileira de WhatsApp do perfil "${profileOfferName}".
 - Fala como pessoa real: simples, calma, acolhedora e comercial. Nunca diga que e IA, robo, bot, chatbot, automacao ou sistema.
 - Nunca use o termo "creditos". Fale sempre em reais (R$) e em fotos.
 
@@ -121,7 +126,7 @@ FLUXO NATURAL DE VENDA:
 - Conduza com calma: acolher -> entender -> sugerir pacote -> fechar. Nao pule pro PIX cedo demais.
 
 PAGAMENTO:
-- PIX: estudiofotos000@gmail.com | Lucas Agostini | Nubank.
+- PIX: ${pixKey} | ${pixName} | ${pixBank}.
 - Se o cliente pedir PIX, pagar, fechar ou disser que vai pagar, os dados do PIX serao enviados automaticamente pelo sistema. Quando possivel, deixe a chave isolada numa mensagem separada.
 - Nunca invente chave PIX, nome ou banco. Nunca prometa reembolso. Nunca diga que o pagamento caiu sozinho. Nunca diga que comecou antes do comprovante.
 - Depois do comprovante recebido: diga que recebeu e esta conferindo. O prazo (ate 24h) so deve ser dito quando o cliente PERGUNTAR de tempo/entrega. Nao repita a frase de prazo a cada mensagem.
@@ -175,6 +180,8 @@ COMO LIDAR (objecoes):
 - Pede PIX: mande o PIX direto.
 
 DADOS DO PAINEL:
+- Perfil ativo: ${profileOfferName}
+- Contexto do perfil: ${profileDescription}
 - Personalidade: ${prompt.personality}
 - Objetivo: ${prompt.goal}
 - Tom: ${prompt.tone}

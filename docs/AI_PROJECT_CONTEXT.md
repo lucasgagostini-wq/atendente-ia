@@ -320,4 +320,115 @@ Antes de tráfego real, rodar a sequência:
 
 ---
 
-*Última atualização: 2026-06-08*
+## 19. Arquitetura multi-perfil (2026-06-09)
+
+Implementado o primeiro corte real de multi-perfil/oferta.
+
+### Perfis existentes
+
+1. `restauracao-fotos`
+   - Nome: `Restauração de Fotos`
+   - Pix: `estudiofotos000@gmail.com` / `Lucas Agostini` / `Nubank`
+   - Status inicial seguro: `PAUSED`
+   - `aiEnabled`: `false` por padrão na criação
+   - Usa o WhatsApp/bridge atual como fallback compatível
+
+2. `musica-personalizada`
+   - Nome: `Música Personalizada`
+   - Status: `AWAITING_WHATSAPP`
+   - `aiEnabled`: `false`
+   - Prompt placeholder criado
+   - Ainda sem Pix definitivo e sem WhatsApp conectado
+
+### Banco / schema
+
+- Novo enum: `ProfileStatus`
+  - `ACTIVE`
+  - `PAUSED`
+  - `AWAITING_WHATSAPP`
+  - `DISCONNECTED`
+- Novo model: `Profile`
+  - campos: `id`, `name`, `slug`, `description`, `status`, `aiEnabled`, `whatsappNumber`, `whatsappSessionName`, `pixKey`, `pixName`, `pixBank`, `promptConfig`, `settings`, `createdAt`, `updatedAt`
+- `Lead`
+  - ganhou `profileId`
+  - `phone` deixou de ser único global
+  - novo composto único: `@@unique([profileId, phone])`
+- `Prompt`
+  - ganhou `profileId`
+- Migration criada:
+  - `prisma/migrations/20260609_multi_profile/migration.sql`
+
+### Bootstrap / backfill
+
+- Serviço novo: `services/profile.service.ts`
+- `ensureDefaultProfiles()` faz:
+  - upsert dos perfis padrão
+  - backfill de leads sem `profileId` para `restauracao-fotos`
+  - backfill de prompts sem `profileId` para `restauracao-fotos`
+  - criação automática de prompt placeholder para `musica-personalizada`
+- Teste dedicado:
+  - `npm run test:profiles`
+
+### Seleção de perfil no app
+
+- Seletor global no shell autenticado
+- Cookie usado: `active-profile`
+- Query param suportado e preferido:
+  - `?profile=restauracao-fotos`
+  - `?profile=musica-personalizada`
+- Arquivos centrais:
+  - `components/layout/profile-switcher.tsx`
+  - `hooks/use-profiles.ts`
+  - `lib/profile-utils.ts`
+  - `app/api/profiles/route.ts`
+
+### Escopo por perfil já aplicado
+
+- Dashboard
+- Conversas
+- Leads
+- Prompt
+- Status de integrações
+- Toggle de IA
+- Webhook WhatsApp
+- Envio manual `/api/evolution/send`
+- Importação do prospector para CRM
+
+### Webhook / bridge
+
+- `scripts/baileys-bridge.mjs` agora envia `profileSlug` no payload do webhook
+- ENV suportada no bridge:
+  - `WHATSAPP_PROFILE_SLUG`
+  - fallback: `PROFILE_SLUG`
+- Se o webhook não receber `profileSlug`, cai em:
+  - `restauracao-fotos`
+
+### IA por perfil
+
+- O webhook resolve o `Profile` antes de responder
+- `Prompt` agora é carregado por `profileId`
+- `composeSystemPrompt()` recebe o perfil ativo
+- A IA só responde se:
+  - `settings.aiPaused !== true` (trava global de segurança)
+  - `profile.aiEnabled === true`
+  - lead não estiver em takeover humano
+
+### Limitações atuais (intencionais)
+
+- `musica-personalizada` ainda não tem funil comercial definitivo
+- `musica-personalizada` ainda não tem Pix definitivo
+- `musica-personalizada` ainda não tem bridge/WhatsApp dedicado
+- O bridge atual continua monoperfil na prática; o `profileSlug` já prepara o caminho para múltiplos números, mas ainda não existe gerenciador avançado local
+- `app/configuracoes/page.tsx` e `app/disparos/page.tsx` continuaram intocados por causa das mudanças locais pré-existentes
+
+### Comandos úteis
+
+- `npm run test:profiles`
+- `npm run test:webhook-logic`
+- `npm run test:ai-safety`
+- `npm run test:ai-conversations`
+- `npm run bridge`
+
+---
+
+*Última atualização: 2026-06-09*

@@ -2,6 +2,7 @@
 
 import { apiRequest as request } from "@/lib/api-client";
 import { useEffect } from "react";
+import { getClientProfileSlug } from "@/lib/profile-utils";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Conversation } from "@/types";
 
@@ -43,8 +44,10 @@ function mergeConversationIntoList(
 
 
 export function useConversations() {
+  const activeSlug = getClientProfileSlug();
+
   return useQuery<Conversation[]>({
-    queryKey: ["conversations"],
+    queryKey: ["conversations", activeSlug],
     queryFn: () => request<Conversation[]>("/api/conversations"),
     refetchInterval: CONVERSATIONS_POLL_INTERVAL_MS,
     refetchIntervalInBackground: true,
@@ -55,9 +58,10 @@ export function useConversations() {
 
 export function useConversation(id?: string) {
   const queryClient = useQueryClient();
+  const activeSlug = getClientProfileSlug();
 
   const query = useQuery<Conversation>({
-    queryKey: ["conversation", id],
+    queryKey: ["conversation", activeSlug, id],
     queryFn: () => request<Conversation>(`/api/conversations/${id}`),
     enabled: Boolean(id),
     refetchInterval: ACTIVE_CONVERSATION_POLL_INTERVAL_MS,
@@ -70,16 +74,17 @@ export function useConversation(id?: string) {
     if (!query.data) return;
 
     queryClient.setQueryData<Conversation[] | undefined>(
-      ["conversations"],
+      ["conversations", activeSlug],
       (current) => mergeConversationIntoList(current, query.data as Conversation),
     );
-  }, [query.data, queryClient]);
+  }, [activeSlug, query.data, queryClient]);
 
   return query;
 }
 
 export function useCreateConversation() {
   const queryClient = useQueryClient();
+  const activeSlug = getClientProfileSlug();
 
   return useMutation({
     mutationFn: (body: { leadId: string }) =>
@@ -88,13 +93,14 @@ export function useCreateConversation() {
         body: JSON.stringify(body),
       }),
     onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ["conversations"] });
+      await queryClient.invalidateQueries({ queryKey: ["conversations", activeSlug] });
     },
   });
 }
 
 export function useUpdateConversation() {
   const queryClient = useQueryClient();
+  const activeSlug = getClientProfileSlug();
 
   return useMutation({
     mutationFn: (args: { id: string; body: Record<string, unknown> }) =>
@@ -104,9 +110,9 @@ export function useUpdateConversation() {
       }),
     onSuccess: async (_, variables) => {
       await Promise.all([
-        queryClient.invalidateQueries({ queryKey: ["conversations"] }),
+        queryClient.invalidateQueries({ queryKey: ["conversations", activeSlug] }),
         queryClient.invalidateQueries({
-          queryKey: ["conversation", variables.id],
+          queryKey: ["conversation", activeSlug, variables.id],
         }),
       ]);
     },

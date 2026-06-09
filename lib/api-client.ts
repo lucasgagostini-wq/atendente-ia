@@ -16,6 +16,23 @@ export class ApiError extends Error {
   }
 }
 
+function appendActiveProfileToApiUrl(input: RequestInfo | URL) {
+  if (typeof window === "undefined" || typeof input !== "string" || !input.startsWith("/api/")) {
+    return input;
+  }
+
+  const currentUrl = new URL(window.location.href);
+  const activeProfile = currentUrl.searchParams.get("profile");
+  if (!activeProfile) return input;
+
+  const requestUrl = new URL(input, currentUrl.origin);
+  if (!requestUrl.searchParams.has("profile")) {
+    requestUrl.searchParams.set("profile", activeProfile);
+  }
+
+  return `${requestUrl.pathname}${requestUrl.search}`;
+}
+
 /**
  * Faz uma requisição autenticada à API interna do Next.js.
  * Lança ApiError em caso de status >= 400.
@@ -24,7 +41,9 @@ export async function apiRequest<T>(
   input: RequestInfo | URL,
   init?: RequestInit,
 ): Promise<T> {
-  const response = await fetch(input, {
+  const resolvedInput = appendActiveProfileToApiUrl(input);
+
+  const response = await fetch(resolvedInput, {
     ...init,
     headers: {
       "Content-Type": "application/json",
@@ -32,7 +51,6 @@ export async function apiRequest<T>(
     },
   });
 
-  // Tenta parsear JSON independente do status
   const payload = await response.json().catch(() => null);
 
   if (!response.ok) {
@@ -46,7 +64,6 @@ export async function apiRequest<T>(
   return payload as T;
 }
 
-/** Helpers para os métodos HTTP mais usados */
 export const api = {
   get: <T>(url: string) => apiRequest<T>(url),
 

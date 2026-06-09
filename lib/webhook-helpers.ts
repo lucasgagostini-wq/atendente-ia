@@ -32,6 +32,7 @@ import type { PixReceiptAnalysis } from "@/services/payment-receipt.service";
 
 export type IncomingPayload = {
   phone: string;
+  profileSlug?: string | null;
   text: string;
   messageId: string | null;
   type: "TEXT" | "IMAGE" | "AUDIO";
@@ -44,6 +45,7 @@ export type IncomingPayload = {
 
 export type OutgoingPayload = {
   phone: string;
+  profileSlug?: string | null;
   text: string;
   messageId: string | null;
   type: "TEXT" | "IMAGE" | "AUDIO";
@@ -236,6 +238,12 @@ function extractPayload(
 
   return {
     phone,
+    profileSlug:
+      typeof payload?.data?.profileSlug === "string"
+        ? payload.data.profileSlug
+        : typeof payload?.profileSlug === "string"
+          ? payload.profileSlug
+          : null,
     text,
     messageId: keyNode?.id ?? null,
     type: classification.dbType,

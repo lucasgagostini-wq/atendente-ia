@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
+import { getProfileSlugFromRequest } from "@/lib/profile-context";
 import { prisma } from "@/lib/prisma";
 import { settingsSchema } from "@/lib/validations";
 import { getSettings, invalidateSettingsCache } from "@/lib/settings-cache";
+import { profileService } from "@/services/profile.service";
 
 export const dynamic = "force-dynamic";
 
@@ -18,13 +20,31 @@ function toActorId(value?: string | null) {
   return normalized ? normalized : "compass/crawler-google-places";
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   const settings = await getSettings();
-  return NextResponse.json(settings);
+  const activeProfile = await profileService.getProfileBySlug(
+    getProfileSlugFromRequest(request),
+  );
+
+  return NextResponse.json({
+    ...settings,
+    profileId: activeProfile.id,
+    profileSlug: activeProfile.slug,
+    profileStatus: activeProfile.status,
+    profileAiEnabled: activeProfile.aiEnabled,
+    whatsappNumber: activeProfile.whatsappNumber,
+    whatsappSessionName: activeProfile.whatsappSessionName,
+    pixKey: activeProfile.pixKey,
+    pixName: activeProfile.pixName,
+    pixBank: activeProfile.pixBank,
+  });
 }
 
 export async function PATCH(request: Request) {
   try {
+    const activeProfile = await profileService.getProfileBySlug(
+      getProfileSlugFromRequest(request),
+    );
     const body = await request.json();
     const parsed = settingsSchema.partial().safeParse(body);
 
@@ -73,6 +93,30 @@ export async function PATCH(request: Request) {
 
     // Invalidar cache para que a próxima requisição busque os dados atualizados
     invalidateSettingsCache();
+
+    const profileUpdates: Record<string, unknown> = {};
+    if (typeof body?.whatsappNumber === "string") {
+      profileUpdates.whatsappNumber = toNullable(body.whatsappNumber);
+    }
+    if (typeof body?.whatsappSessionName === "string") {
+      profileUpdates.whatsappSessionName = toNullable(body.whatsappSessionName);
+    }
+    if (typeof body?.pixKey === "string") {
+      profileUpdates.pixKey = toNullable(body.pixKey);
+    }
+    if (typeof body?.pixName === "string") {
+      profileUpdates.pixName = toNullable(body.pixName);
+    }
+    if (typeof body?.pixBank === "string") {
+      profileUpdates.pixBank = toNullable(body.pixBank);
+    }
+
+    if (Object.keys(profileUpdates).length > 0) {
+      await prisma.profile.update({
+        where: { id: activeProfile.id },
+        data: profileUpdates,
+      });
+    }
 
     return NextResponse.json(settings);
   } catch (error) {

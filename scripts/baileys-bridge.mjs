@@ -27,6 +27,10 @@ const authDir =
   process.env.BAILEYS_AUTH_DIR || path.resolve(__dirname, "..", ".baileys", instanceName);
 const autoReconnect = process.env.BAILEYS_AUTO_RECONNECT !== "false";
 const autoStart = process.env.BAILEYS_BRIDGE_AUTOSTART === "true";
+const profileSlug =
+  process.env.WHATSAPP_PROFILE_SLUG ||
+  process.env.PROFILE_SLUG ||
+  "restauracao-fotos";
 
 let webhookUrl = process.env.BAILEYS_BRIDGE_WEBHOOK_URL || "";
 
@@ -571,6 +575,7 @@ async function startSocket(options = {}) {
           await emitWebhook({
             event: "MESSAGES_UPSERT",
             data: {
+              profileSlug,
               phone,
               replyTransport: "baileys_bridge",
               key: {
@@ -620,6 +625,7 @@ async function startSocket(options = {}) {
           const webhookResponse = await emitWebhook({
             event: "MESSAGES_UPSERT",
             data: {
+              profileSlug,
               phone,
               replyTransport: "baileys_bridge",
               key: {
@@ -737,6 +743,7 @@ function authMiddleware(req, res, next) {
 app.get("/health", (_, res) => {
   res.json({
     ok: true,
+    profileSlug,
     instanceName,
     state: socketState,
     connected: socketState === "open",

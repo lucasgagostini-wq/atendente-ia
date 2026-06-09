@@ -1,7 +1,9 @@
 import { FunnelStage, LeadStatus } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
 import { leadSchema } from "@/lib/validations";
+import { getProfileSlugFromRequest } from "@/lib/profile-context";
 import { leadService } from "@/services/lead.service";
+import { profileService } from "@/services/profile.service";
 import { handleApiError } from "@/lib/api-handler";
 
 export const dynamic = "force-dynamic";
@@ -14,10 +16,14 @@ function toNullable(value?: string | null) {
 export async function GET(request: NextRequest) {
   try {
     const { searchParams } = request.nextUrl;
+    const activeProfile = await profileService.getProfileBySlug(
+      getProfileSlugFromRequest(request),
+    );
     const limitParam = searchParams.get("limit");
     const skipParam = searchParams.get("skip");
 
     const leads = await leadService.getLeads({
+      profileId: activeProfile.id,
       search: searchParams.get("search") ?? undefined,
       stage: (searchParams.get("stage") as FunnelStage | null) ?? undefined,
       status: (searchParams.get("status") as LeadStatus | null) ?? undefined,
@@ -34,6 +40,9 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: Request) {
   try {
+    const activeProfile = await profileService.getProfileBySlug(
+      getProfileSlugFromRequest(request),
+    );
     const body = await request.json();
     const parsed = leadSchema.safeParse(body);
 
@@ -45,6 +54,7 @@ export async function POST(request: Request) {
     }
 
     const lead = await leadService.createLead({
+      profile: { connect: { id: activeProfile.id } },
       name: parsed.data.name || null,
       phone: parsed.data.phone.replace(/\D/g, ""),
       source: toNullable(parsed.data.source),

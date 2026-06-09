@@ -5,6 +5,7 @@ const LEADS_DEFAULT_LIMIT = 500;
 const LEADS_MAX_LIMIT = 2000;
 
 type LeadFilters = {
+  profileId?: string;
   search?: string;
   stage?: FunnelStage;
   status?: LeadStatus;
@@ -17,6 +18,7 @@ type LeadFilters = {
 };
 
 type BulkLeadActionInput = {
+  profileId?: string;
   leadIds: string[];
   action: "DELETE" | "ADD_TAGS" | "REMOVE_TAGS" | "UPDATE_FIELDS";
   tagIds?: string[];
@@ -32,6 +34,10 @@ type BulkLeadActionInput = {
 class LeadService {
   async getLeads(filters: LeadFilters = {}) {
     const where: Prisma.LeadWhereInput = {};
+
+    if (filters.profileId) {
+      where.profileId = filters.profileId;
+    }
 
     if (filters.search) {
       where.OR = [
@@ -83,10 +89,14 @@ class LeadService {
     });
   }
 
-  async getLeadById(id: string) {
-    return prisma.lead.findUnique({
-      where: { id },
+  async getLeadById(id: string, profileId?: string) {
+    return prisma.lead.findFirst({
+      where: {
+        id,
+        ...(profileId ? { profileId } : {}),
+      },
       include: {
+        profile: true,
         leadTags: { include: { tag: true } },
         conversations: {
           orderBy: { updatedAt: "desc" },
@@ -96,12 +106,25 @@ class LeadService {
     });
   }
 
-  async upsertByPhone(phone: string, payload?: Partial<Prisma.LeadCreateInput>) {
+  async upsertByPhone(
+    phone: string,
+    payload?: Partial<Prisma.LeadCreateInput>,
+    profileId?: string,
+  ) {
     const cleanPhone = phone.replace(/\D/g, "");
+    if (!profileId) {
+      throw new Error("profileId é obrigatório para upsert do lead");
+    }
 
     return prisma.lead.upsert({
-      where: { phone: cleanPhone },
+      where: {
+        profileId_phone: {
+          profileId,
+          phone: cleanPhone,
+        },
+      },
       create: {
+        profileId,
         phone: cleanPhone,
         name: payload?.name,
         source: payload?.source ?? "whatsapp",
@@ -186,9 +209,26 @@ class LeadService {
       return { affected: 0 };
     }
 
+    const scopedWhere = {
+      id: { in: uniqueLeadIds },
+      ...(input.profileId ? { profileId: input.profileId } : {}),
+    } satisfies Prisma.LeadWhereInput;
+    const scopedLeadIds = (
+      await prisma.lead.findMany({
+        where: scopedWhere,
+        select: { id: true },
+      })
+    ).map((lead) => lead.id);
+
+    if (scopedLeadIds.length === 0) {
+      return { affected: 0 };
+    }
+
     if (input.action === "DELETE") {
       const result = await prisma.lead.deleteMany({
-        where: { id: { in: uniqueLeadIds } },
+        where: {
+          id: { in: scopedLeadIds },
+        },
       });
       return { affected: result.count };
     }
@@ -197,7 +237,7 @@ class LeadService {
       const uniqueTagIds = Array.from(new Set(input.tagIds ?? []));
       if (uniqueTagIds.length === 0) return { affected: 0 };
 
-      const rows = uniqueLeadIds.flatMap((leadId) =>
+      const rows = scopedLeadIds.flatMap((leadId) =>
         uniqueTagIds.map((tagId) => ({ leadId, tagId })),
       );
 
@@ -214,7 +254,7 @@ class LeadService {
 
       const result = await prisma.leadTag.deleteMany({
         where: {
-          leadId: { in: uniqueLeadIds },
+          leadId: { in: scopedLeadIds },
           tagId: { in: uniqueTagIds },
         },
       });
@@ -234,7 +274,7 @@ class LeadService {
     }
 
     const result = await prisma.lead.updateMany({
-      where: { id: { in: uniqueLeadIds } },
+      where: { id: { in: scopedLeadIds } },
       data: updateData,
     });
 

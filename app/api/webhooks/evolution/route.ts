@@ -13,10 +13,12 @@ import { prisma } from "@/lib/prisma";
 import { conversationService } from "@/services/conversation.service";
 import { evolutionService } from "@/services/evolution.service";
 import { getSettings } from "@/lib/settings-cache";
+import { DEFAULT_PROFILE_SLUG } from "@/lib/profile-defaults";
 import { leadService } from "@/services/lead.service";
 import { openRouterService } from "@/services/openrouter.service";
 import { paymentReceiptService } from "@/services/payment-receipt.service";
 import type { PixReceiptAnalysis } from "@/services/payment-receipt.service";
+import { profileService } from "@/services/profile.service";
 import { promptService } from "@/services/prompt.service";
 import {
   buildAiIncomingTextFromBatch,
@@ -487,6 +489,8 @@ export async function POST(request: Request) {
   try {
     const incoming = extractIncomingPayload(payload);
     const outgoing = extractOutgoingPayload(payload);
+    const inboundProfile = incoming?.profileSlug || outgoing?.profileSlug || DEFAULT_PROFILE_SLUG;
+    const activeProfile = await profileService.getProfileBySlug(inboundProfile);
 
     if (outgoing) {
       if (outgoing.messageId) {
@@ -507,7 +511,7 @@ export async function POST(request: Request) {
 
       const lead = await leadService.upsertByPhone(outgoing.phone, {
         source: "whatsapp",
-      });
+      }, activeProfile.id);
       const conversation = await conversationService.getOrCreateOpenConversation(lead.id);
 
       await conversationService.saveMessage({
@@ -567,10 +571,10 @@ export async function POST(request: Request) {
     }
 
     // ── Upsert lead ──────────────────────────────────────────
-    const lead = await leadService.upsertByPhone(incoming.phone, {
-      name: incoming.senderName,
-      source: "whatsapp",
-    });
+      const lead = await leadService.upsertByPhone(incoming.phone, {
+        name: incoming.senderName,
+        source: "whatsapp",
+      }, activeProfile.id);
 
     // ── Criar/buscar conversa ────────────────────────────────
     const conversation = await conversationService.getOrCreateOpenConversation(lead.id);
@@ -645,6 +649,10 @@ export async function POST(request: Request) {
     const globalSettings = await getSettings();
     if (globalSettings.aiPaused) {
       return NextResponse.json({ ok: true, aiSkipped: true, reason: "ai_globally_paused" });
+    }
+
+    if (!activeProfile.aiEnabled) {
+      return NextResponse.json({ ok: true, aiSkipped: true, reason: "ai_disabled_for_profile" });
     }
 
     // ── IA desativada para este lead ─────────────────────────
@@ -1051,7 +1059,7 @@ export async function POST(request: Request) {
     }
 
     // ── Resposta da IA ───────────────────────────────────────
-    const prompt = await promptService.getActivePrompt();
+    const prompt = await promptService.getActivePrompt(activeProfile.id);
     const aiRecentHistory = recentHistory.slice(-6);
     const aiIncomingText = batchedIncomingText;
 
@@ -1079,6 +1087,7 @@ export async function POST(request: Request) {
       prompt,
       lead,
       recentHistory: aiRecentHistory,
+      profile: activeProfile,
     });
     const promptValidation = validatePromptMaster(prompt);
 

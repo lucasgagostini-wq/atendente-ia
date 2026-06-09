@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { leadSchema } from "@/lib/validations";
+import { getProfileSlugFromRequest } from "@/lib/profile-context";
 import { leadService } from "@/services/lead.service";
+import { profileService } from "@/services/profile.service";
 
 export const dynamic = "force-dynamic";
 
@@ -14,7 +16,10 @@ type Context = {
 };
 
 export async function GET(_: Request, context: Context) {
-  const lead = await leadService.getLeadById(context.params.id);
+  const activeProfile = await profileService.getProfileBySlug(
+    getProfileSlugFromRequest(_),
+  );
+  const lead = await leadService.getLeadById(context.params.id, activeProfile.id);
 
   if (!lead) {
     return NextResponse.json({ error: "Lead não encontrado" }, { status: 404 });
@@ -25,6 +30,9 @@ export async function GET(_: Request, context: Context) {
 
 export async function PATCH(request: Request, context: Context) {
   try {
+    const activeProfile = await profileService.getProfileBySlug(
+      getProfileSlugFromRequest(request),
+    );
     const body = await request.json();
     const parsed = leadSchema.partial().safeParse(body);
 
@@ -33,6 +41,11 @@ export async function PATCH(request: Request, context: Context) {
         { error: parsed.error.flatten() },
         { status: 400 },
       );
+    }
+
+    const currentLead = await leadService.getLeadById(context.params.id, activeProfile.id);
+    if (!currentLead) {
+      return NextResponse.json({ error: "Lead não encontrado" }, { status: 404 });
     }
 
     const lead = await leadService.updateLead(context.params.id, {
@@ -63,7 +76,11 @@ export async function PATCH(request: Request, context: Context) {
 
 export async function DELETE(_: Request, context: Context) {
   try {
+    const activeProfile = await profileService.getProfileBySlug(
+      getProfileSlugFromRequest(_),
+    );
     await leadService.runBulkAction({
+      profileId: activeProfile.id,
       action: "DELETE",
       leadIds: [context.params.id],
     });
