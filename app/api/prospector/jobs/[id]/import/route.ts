@@ -3,7 +3,6 @@ import { prospectorImportSchema } from "@/lib/validations";
 import { prospectorService } from "@/services/prospector.service";
 
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
 export const maxDuration = 180;
 
 type Context = {
