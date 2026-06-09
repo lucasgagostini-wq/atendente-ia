@@ -37,6 +37,8 @@ import { useLeads } from "@/hooks/use-leads";
 import { useIntegrationsStatus } from "@/hooks/use-integrations";
 import { useProfiles } from "@/hooks/use-profiles";
 import { useAiPausedState, useToggleAiPause } from "@/hooks/use-ai-toggle";
+import { useActiveProfileSlug } from "@/hooks/use-active-profile-slug";
+import { buildProfileHref } from "@/lib/profile-utils";
 
 function isSameDay(a: Date, b: Date) {
   return a.getFullYear() === b.getFullYear() &&
@@ -58,6 +60,7 @@ export default function DashboardPage() {
   const { data: profileContext } = useProfiles();
   const { data: aiState } = useAiPausedState();
   const toggleAi = useToggleAiPause();
+  const activeProfileSlug = useActiveProfileSlug();
 
   const loading = leadsLoading || conversationsLoading;
   const aiPaused = aiState?.aiPaused ?? false;
@@ -242,13 +245,13 @@ export default function DashboardPage() {
               )}
             </Button>
 
-            <Link href="/conversas">
+            <Link href={buildProfileHref("/conversas", activeProfileSlug)}>
               <Button size="sm" variant="secondary">
                 <ChatCircleText size={14} weight="duotone" aria-hidden="true" />
                 Ver conversas
               </Button>
             </Link>
-            <Link href="/configuracoes">
+            <Link href={buildProfileHref("/configuracoes", activeProfileSlug)}>
               <Button size="sm" variant="outline">
                 <Gear size={14} aria-hidden="true" />
                 Configurar
@@ -360,7 +363,7 @@ export default function DashboardPage() {
                 return (
                   <Link
                     key={item.label}
-                    href={item.href}
+                    href={buildProfileHref(item.href, activeProfileSlug)}
                     className="flex items-center gap-3 px-4 py-3.5 transition-colors hover:bg-zinc-800/30"
                   >
                     <div className={`grid size-7 place-items-center rounded-lg ring-1 transition-colors ${
@@ -450,7 +453,7 @@ export default function DashboardPage() {
               {workspaceGuide.map((item) => {
                 const Icon = item.icon;
                 return (
-                  <Link key={item.href} href={item.href}>
+                  <Link key={item.href} href={buildProfileHref(item.href, activeProfileSlug)}>
                     <Surface variant="interactive" padding="md" className="h-full">
                       <div className="flex items-start gap-3">
                         <div className={`grid size-9 shrink-0 place-items-center rounded-xl ring-1 ${item.bg} ${item.ring}`}>
@@ -498,7 +501,7 @@ export default function DashboardPage() {
         ).map((svc) => {
             const Icon = svc.icon;
             return (
-              <Link key={svc.label} href={svc.href}>
+              <Link key={svc.label} href={buildProfileHref(svc.href, activeProfileSlug)}>
                 <Surface variant="interactive" padding="sm" className="flex items-center gap-3">
                   <div className={`grid size-8 shrink-0 place-items-center rounded-lg ring-1 ${
                     svc.status === "connected"
@@ -540,7 +543,7 @@ export default function DashboardPage() {
                 <p className="text-sm font-semibold text-zinc-200">Atividade recente</p>
                 <p className="text-[11px] text-zinc-600">Últimas conversas</p>
               </div>
-              <Link href="/conversas" className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 transition-colors">
+              <Link href={buildProfileHref("/conversas", activeProfileSlug)} className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 transition-colors">
                 Ver todas <ArrowRight size={12} />
               </Link>
             </div>
@@ -561,7 +564,7 @@ export default function DashboardPage() {
               {recentActivity.map((item) => (
                 <Link
                   key={item.id}
-                  href="/conversas"
+                  href={buildProfileHref("/conversas", activeProfileSlug)}
                   className="flex items-start gap-3 px-4 py-3 transition-colors hover:bg-zinc-800/30"
                 >
                   <div className="mt-0.5 grid size-7 shrink-0 place-items-center rounded-full bg-zinc-800 text-xs font-bold text-zinc-400 ring-1 ring-zinc-700/50">
@@ -595,7 +598,7 @@ export default function DashboardPage() {
           ].map((link) => {
             const Icon = link.icon;
             return (
-              <Link key={link.href} href={link.href}>
+              <Link key={link.href} href={buildProfileHref(link.href, activeProfileSlug)}>
                 <Surface variant="interactive" padding="md" className="flex items-start gap-3 h-full">
                   <div className={`mt-0.5 grid size-8 shrink-0 place-items-center rounded-lg ring-1 ${link.bg} ${link.ring}`}>
                     <Icon size={16} weight="duotone" className={link.color} />

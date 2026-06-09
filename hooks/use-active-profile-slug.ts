@@ -1,6 +1,6 @@
 "use client";
 
-import { useSyncExternalStore } from "react";
+import { useEffect, useState } from "react";
 import { DEFAULT_PROFILE_SLUG, getClientProfileSlug } from "@/lib/profile-utils";
 
 const LOCATION_CHANGE_EVENT = "codex:profile-location-change";
@@ -36,25 +36,27 @@ function ensureHistoryListeners() {
   historyWithFlag.__profileLocationPatched = true;
 }
 
-function subscribe(onStoreChange: () => void) {
-  if (typeof window === "undefined") {
-    return () => {};
-  }
-
-  ensureHistoryListeners();
-  window.addEventListener(LOCATION_CHANGE_EVENT, onStoreChange);
-  window.addEventListener("popstate", onStoreChange);
-
-  return () => {
-    window.removeEventListener(LOCATION_CHANGE_EVENT, onStoreChange);
-    window.removeEventListener("popstate", onStoreChange);
-  };
-}
-
-function getSnapshot() {
-  return getClientProfileSlug() || DEFAULT_PROFILE_SLUG;
-}
-
 export function useActiveProfileSlug() {
-  return useSyncExternalStore(subscribe, getSnapshot, () => DEFAULT_PROFILE_SLUG);
+  const [activeSlug, setActiveSlug] = useState(DEFAULT_PROFILE_SLUG);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const sync = () => {
+      setActiveSlug(getClientProfileSlug() || DEFAULT_PROFILE_SLUG);
+    };
+
+    ensureHistoryListeners();
+    sync();
+
+    window.addEventListener(LOCATION_CHANGE_EVENT, sync);
+    window.addEventListener("popstate", sync);
+
+    return () => {
+      window.removeEventListener(LOCATION_CHANGE_EVENT, sync);
+      window.removeEventListener("popstate", sync);
+    };
+  }, []);
+
+  return activeSlug;
 }
