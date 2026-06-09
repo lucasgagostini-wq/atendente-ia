@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server";
 import { aiRespondSchema } from "@/lib/validations";
+
+export const maxDuration = 60;
 import { conversationService } from "@/services/conversation.service";
 import { openRouterService } from "@/services/openrouter.service";
 import { promptService } from "@/services/prompt.service";

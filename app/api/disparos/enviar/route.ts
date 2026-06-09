@@ -3,6 +3,7 @@ import { broadcastSendSchema } from "@/lib/validations";
 import { broadcastService } from "@/services/broadcast.service";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 30;
 export const maxDuration = 300;
 
 export async function POST(request: Request) {

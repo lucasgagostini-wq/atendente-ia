@@ -5,6 +5,8 @@
  * Fluxo: receber → deduplicar → upsert lead → salvar mensagem → responder com IA
  */
 
+export const maxDuration = 30;
+
 import { NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
