@@ -7,6 +7,7 @@ import {
   ArrowLeft,
   Robot,
   SignOut,
+  TerminalWindow,
 } from "@phosphor-icons/react";
 import { AdminCommandPalette } from "@/components/admin-console/admin-command-palette";
 import { cn } from "@/lib/utils";
@@ -168,6 +169,15 @@ export function AppShell({ children }: Props) {
                     <span className="size-1.5 rounded-full bg-emerald-400 status-pulse" />
                     {(process.env.NEXT_PUBLIC_APP_URL ?? "").includes("localhost") ? "local" : "produção"}
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => window.dispatchEvent(new CustomEvent("admin:open-console"))}
+                    title="Abrir console de comandos (Ctrl+K)"
+                    className="flex items-center gap-1.5 rounded-lg border border-indigo-500/40 bg-indigo-500/10 px-2.5 py-1.5 text-xs font-medium text-indigo-300 transition-colors hover:bg-indigo-500/20 hover:text-indigo-200"
+                  >
+                    <TerminalWindow size={13} weight="duotone" />
+                    Comandos
+                  </button>
                   <button
                     onClick={logout}
                     className="hidden lg:flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs text-zinc-600 transition-colors hover:bg-zinc-800/60 hover:text-zinc-300"
