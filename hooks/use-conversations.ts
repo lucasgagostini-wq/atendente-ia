@@ -5,8 +5,8 @@ import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Conversation } from "@/types";
 
-const CONVERSATIONS_POLL_INTERVAL_MS = 10_000;
-const ACTIVE_CONVERSATION_POLL_INTERVAL_MS = 5_000;
+const CONVERSATIONS_POLL_INTERVAL_MS = 5_000;
+const ACTIVE_CONVERSATION_POLL_INTERVAL_MS = 3_000;
 
 function getLatestMessageTimestamp(conversation: Conversation) {
   const latestMessage = conversation.messages?.reduce((latest, message) => {

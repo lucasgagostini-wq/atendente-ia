@@ -883,6 +883,40 @@ function guardrailReplyForObjection(context: SafetyContext = {}) {
   return null;
 }
 
+// ── Sinal de confusão / pedido de explicação ──────────────────────
+// Lead disse algo como "não entendi", "?", "como assim", "explica".
+// A IA NÃO deve repetir "me manda a foto" nesses casos — deve explicar.
+const CONFUSION_SIGNAL_PATTERN =
+  /^(\?+|nao entendi|não entendi|como assim|como funciona|o que (e|é) isso|que (e|é) isso|explica|nao sei|não sei|perdao|perdão|que(m|)?|hein|oi\?|ola\?|quem (e|é) voc|pq|por que|por que a|do que voce|do que você|que (servico|serviço)|que (tipo|tipo)|que (foto|imagem)|nao entend|como e|como é|isso como|como funciona|funciona como|como assim|o que voce|o que você)\b/i;
+
+export function isConfusionSignal(text?: string | null) {
+  const normalized = normalize(text).toLowerCase().replace(/[!,;]+/g, "").trim();
+  return CONFUSION_SIGNAL_PATTERN.test(normalized) || normalized === "?" || normalized === "??";
+}
+
+/** Verdadeiro se a IA JÁ pediu a foto nas últimas 2 falas do atendente. */
+export function photoAlreadyAskedRecently(recentHistory: string[] = []) {
+  const assistantLines = recentHistory
+    .filter((line) => /^\s*atendente:/i.test(line))
+    .slice(-2)
+    .map((line) => line.toLowerCase());
+  return assistantLines.some((line) =>
+    /me manda a foto|manda a foto|envia a foto|me envia a foto|manda aqui que eu vejo|mande a foto|pode mandar a foto|manda ela aqui/i.test(line),
+  );
+}
+
+/**
+ * Resposta para quando o lead não entendeu e a IA JÁ havia pedido a foto.
+ * Explica o processo em 3 mensagens curtas — sem repetir "me manda a foto".
+ */
+export function buildConfusionExplanationResponse() {
+  return [
+    "Claro 😊 Funciona assim: você me passa a foto antiga por aqui.",
+    "Eu vejo se dá pra melhorar. Pra 1 foto fica R$10.",
+    "Depois do Pix, eu faço e entrego em até 24h após a confirmação.",
+  ].join("\n\n");
+}
+
 function dedupeRepeatedLines(lines: string[]) {
   const unique: string[] = [];
 
@@ -917,6 +951,17 @@ export function normalizeCommercialResponse(response: string, context: SafetyCon
 
   if (detectIfPaymentReceiptInvalid(context.summary)) {
     return buildInvalidReceiptResponse(context);
+  }
+
+  // ── Sinal de confusão: lead não entendeu + IA já pediu foto recentemente ──
+  // Neste caso a IA NÃO pode voltar a pedir "me manda a foto". Deve explicar
+  // o processo de forma humana em 3 mensagens curtas.
+  if (
+    isConfusionSignal(context.incomingText) &&
+    !conversationHasServiceImage(context) &&
+    photoAlreadyAskedRecently(context.recentHistory ?? [])
+  ) {
+    return buildConfusionExplanationResponse();
   }
 
   const deadlineReply = guardrailReplyForDeadline(context);
@@ -974,6 +1019,23 @@ export function normalizeCommercialResponse(response: string, context: SafetyCon
     output = commercialReplyForSpecificPhoto(context);
   }
 
+  // ── Anti-repetição: pedido de foto idêntico ao último do atendente ─────
+  // Se o modelo retornou exatamente a mesma frase de pedido de foto que o
+  // atendente já mandou, troca por uma variação que não repita.
+  if (!hasPhotoInContext(context) && asksForPhotoAgain(output)) {
+    const recentNorms = recentAssistantNorms(context.recentHistory ?? []);
+    if (isTooSimilarToRecent(output, recentNorms)) {
+      output = pickNonRepeating(
+        [
+          "Pode mandar a foto aqui, fico aguardando 😊",
+          "Qualquer hora que quiser é só me enviar a foto por aqui.",
+          "Fico por aqui aguardando a foto para avaliar. Pode mandar quando quiser!",
+        ],
+        recentNorms,
+      );
+    }
+  }
+
   output = normalizePrePaymentPromises(output, context);
   output = removeOpenEndedAdjustmentPromises(output);
   output = removePassiveClosers(output);
@@ -1009,6 +1071,15 @@ export function ensureSalesCTA(response: string, context: SafetyContext = {}) {
   if (pixDataAlreadySent(context)) {
     if (/comprovante/i.test(output)) return output;
     return `${output}\n\nAssim que você me mandar o comprovante, eu começo por aqui.`;
+  }
+
+  // Confusão + foto já pedida: a explicação JÁ tem CTA implícito — não sobrepor.
+  if (
+    isConfusionSignal(context.incomingText) &&
+    !conversationHasServiceImage(context) &&
+    photoAlreadyAskedRecently(context.recentHistory ?? [])
+  ) {
+    return output;
   }
 
   if (hasCommercialCTA(output)) {

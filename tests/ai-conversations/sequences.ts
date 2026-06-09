@@ -11,6 +11,7 @@
  */
 
 import {
+  ALWAYS_FORBIDDEN,
   DEADLINE_PHRASE_FORBIDDEN,
   POST_PHOTO_FORBIDDEN,
   POST_RECEIPT_FORBIDDEN,
@@ -175,6 +176,44 @@ export const sequences: Sequence[] = [
     ],
     globals: {
       phraseAtMostOnce: [{ pattern: /at[eé]\s*24h/i, max: 1 }],
+      noConsecutiveDuplicates: true,
+    },
+  },
+
+  {
+    id: "confusion_after_photo_request",
+    title: "Lead diz 'não entendi' → explica processo, sem repetir pedido de foto",
+    classification: "confusão + anti-repetição (bug real)",
+    description:
+      "Lead manda 'oi', IA pede foto, lead diz 'não entendi', IA responde de novo com 'me envie a foto'. Antes: a IA repetia sempre 'me manda a foto'. Agora deve explicar o processo.",
+    initialHistory: [],
+    summary: null,
+    turns: [
+      {
+        label: "oi — IA deve pedir a foto (normal)",
+        batch: [{ content: "Oi" }],
+        expect: {
+          route: "ai_response",
+          forbidden: [...ALWAYS_FORBIDDEN],
+          maxMessages: 2,
+        },
+      },
+      {
+        label: "não entendi — IA deve explicar processo, sem repetir pedido de foto",
+        batch: [{ content: "não entendi" }],
+        expect: {
+          route: "ai_response",
+          required: [/funciona|foto|r\$|pix/i],
+          forbidden: [
+            /^me (manda|envia|envie) a foto/i,
+            /^manda (aqui|a foto)/i,
+            ...ALWAYS_FORBIDDEN,
+          ],
+          maxMessages: 3,
+        },
+      },
+    ],
+    globals: {
       noConsecutiveDuplicates: true,
     },
   },

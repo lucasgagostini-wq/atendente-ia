@@ -13,7 +13,7 @@ import {
   ZapOff,
   Phone,
 } from "lucide-react";
-import { formatDistance, format, isToday, isYesterday, differenceInMinutes } from "date-fns";
+import { format, isToday, isYesterday, differenceInMinutes } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
 import {
@@ -75,11 +75,24 @@ function getLatestMessage(messages: Message[] | undefined) {
   ));
 }
 
-function formatRelativeConversationTime(dateStr: string, now: number) {
-  return formatDistance(new Date(dateStr), new Date(now), {
-    locale: ptBR,
-    addSuffix: true,
-  });
+/**
+ * Formata tempo relativo compacto para a lista de conversas.
+ * Regras: agora (< 60s) → "agora"; < 60 min → "Xm"; < 24h → "Xh";
+ * < 7d → "Xd"; senão → "dd/MM".
+ * Usa `now` como âncora (atualiza a cada 30s) para evitar mostrar "1 min"
+ * em mensagens recém-chegadas.
+ */
+function formatRelativeConversationTime(dateStr: string, now: number): string {
+  const diffMs = now - new Date(dateStr).getTime();
+  if (diffMs < 0) return "agora";            // clock skew
+  if (diffMs < 60_000) return "agora";        // < 1 min
+  const diffMin = Math.floor(diffMs / 60_000);
+  if (diffMin < 60) return `${diffMin} min`;
+  const diffH = Math.floor(diffMin / 60);
+  if (diffH < 24) return `${diffH} h`;
+  const diffD = Math.floor(diffH / 24);
+  if (diffD < 7) return `${diffD} d`;
+  return format(new Date(dateStr), "dd/MM");
 }
 
 function Initials({ name }: { name: string }) {
@@ -144,9 +157,11 @@ export default function ConversasPage() {
   const selectedLatestMessage = getLatestMessage(messages);
 
   useEffect(() => {
+    // Atualiza a cada 30s para que mensagens recém-chegadas não apareçam
+    // imediatamente como "1 min" quando relativeNow está até 59s desatualizado.
     const interval = window.setInterval(() => {
       setRelativeNow(Date.now());
-    }, 60_000);
+    }, 30_000);
 
     return () => window.clearInterval(interval);
   }, []);
@@ -297,9 +312,11 @@ export default function ConversasPage() {
             const name = conv.lead?.name || "Lead sem nome";
             const stage = conv.lead?.funnelStage ?? "COLD";
             const isOpen = conv.status === "OPEN";
+            // Mostra não-lida sempre que a última mensagem (inbound OU outbound
+            // da IA) ainda não foi vista pelo operador — assim a conversa continua
+            // sinalizada mesmo que a IA já tenha respondido dentro da janela de poll.
             const isUnread = Boolean(
               latest &&
-                latest.direction === "INBOUND" &&
                 !active &&
                 seenLatestMessageByConversation[conv.id] !== latest.id,
             );

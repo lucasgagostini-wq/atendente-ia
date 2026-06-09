@@ -361,6 +361,58 @@ export const fixtures: Fixture[] = [
     },
   },
 
+  // ── N) "não entendi" após pedido de foto ─────────────────────
+  {
+    id: "n_confusion_after_photo_request_explains",
+    title: "N) 'Não entendi' após pedido de foto → explica processo, não repete pedido",
+    classification: "confusão + anti-repetição (bug real)",
+    description:
+      "Lead diz 'não entendi' depois da IA já ter pedido a foto. A IA NÃO pode responder 'me envie a foto' de novo. Deve explicar como funciona em 3 partes curtas.",
+    recentHistory: [
+      "Lead: Oi",
+      "Atendente: Consigo te ajudar sim 😊 me manda a foto que você quer restaurar aqui.",
+    ],
+    summary: null,
+    batch: [{ content: "não entendi" }],
+    mockModelResponse: "Me envie a foto que você quer restaurar, assim eu consigo avaliar melhor. 😊",
+    expect: {
+      route: "ai_response",
+      required: [/funciona|foto|r\$\s*10|pix|24h/i],
+      forbidden: [
+        /^me (manda|envia|envie) a foto/i,
+        /^manda (aqui|a foto)/i,
+        /manda ela aqui/i,
+        ...POST_PHOTO_FORBIDDEN,
+        ...ALWAYS_FORBIDDEN,
+      ],
+      maxMessages: 3,
+    },
+  },
+
+  // ── O) Anti-repetição: foto pedida 2× seguidas ───────────────
+  {
+    id: "o_photo_cta_not_repeated_twice",
+    title: "O) CTA de foto não pode aparecer idêntico em 2 mensagens seguidas",
+    classification: "anti-repetição (guardrail)",
+    description:
+      "O atendente já pediu 'me manda a foto' e o lead ainda não mandou. A próxima resposta não pode usar exatamente a mesma frase. Deve variar o CTA.",
+    recentHistory: [
+      "Lead: Oi, quero restaurar uma foto.",
+      "Atendente: Me manda a foto aqui que eu vejo pra você.",
+    ],
+    summary: null,
+    batch: [{ content: "Pode ser qualquer foto?" }],
+    mockModelResponse: "Me manda a foto aqui que eu vejo pra você.",
+    expect: {
+      route: "ai_response",
+      // O guardrail de anti-repetição deve trocar a frase idêntica do atendente
+      // por uma variação — "me manda a foto aqui que eu vejo pra você" (idêntico
+      // ao último do atendente) NÃO pode aparecer na resposta.
+      forbidden: [/me manda a foto aqui que eu vejo pra voc[eê]/i, ...ALWAYS_FORBIDDEN],
+      maxMessages: 3,
+    },
+  },
+
   {
     id: "l_invalid_receipt_then_insists_paid",
     title: "L) Comprovante inválido + insiste 'já paguei' → pedir comprovante visível",
