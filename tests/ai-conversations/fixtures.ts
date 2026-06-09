@@ -14,9 +14,12 @@ import {
   EMOTIONAL_LANGUAGE,
   POST_PHOTO_FORBIDDEN,
   POST_PIX_FORBIDDEN,
+  POST_RECEIPT_FORBIDDEN,
   REQUIRED_ACKNOWLEDGES_SERVICE,
+  REQUIRED_DEADLINE_24H,
   REQUIRED_IN_PIX,
   REQUIRED_PRICE_10,
+  WRONG_DEADLINE_FORBIDDEN,
 } from "./asserts";
 import type { ConversationState, SimRoute } from "./simulate";
 
@@ -212,6 +215,129 @@ export const fixtures: Fixture[] = [
       required: [...REQUIRED_PRICE_10, /pix/i, /cuidado/i],
       forbidden: [/desconto/i, /r\$\s*5\b/i, ...POST_PHOTO_FORBIDDEN, ...ALWAYS_FORBIDDEN],
       maxMessages: 3,
+    },
+  },
+
+  // ── H) Foto persistida no summary ─────────────────────────────
+  {
+    id: "h_photo_persisted_never_ask_which_photo",
+    title: "H) Foto já recebida no estado → nunca perguntar qual foto começar",
+    classification: "estado + guardrail",
+    description:
+      "Mesmo várias mensagens depois, [FOTO_RECEBIDA] deve impedir pedido de foto/qual foto. Se perguntar preço, responde R$10 e CTA de Pix.",
+    recentHistory: [
+      "Lead: Cliente enviou uma foto para restaurar.",
+      "Atendente: Recebi a foto. Dá pra trabalhar nela sim.",
+      "Lead: Quero fazer essa.",
+    ],
+    summary: "[FOTO_RECEBIDA]",
+    batch: [{ content: "Quanto fica pra fazer?" }],
+    mockModelResponse: "Qual foto você gostaria de começar?",
+    expect: {
+      route: "ai_response",
+      required: [...REQUIRED_PRICE_10, /pix/i],
+      forbidden: [...POST_PHOTO_FORBIDDEN, ...ALWAYS_FORBIDDEN],
+      maxMessages: 3,
+    },
+  },
+
+  // ── I) Prazo oficial ──────────────────────────────────────────
+  {
+    id: "i_deadline_is_24h",
+    title: "I) Pergunta prazo → sempre até 24h, nunca 2 a 5 dias úteis",
+    classification: "guardrail + prompt",
+    description:
+      "Se o modelo tentar responder prazo antigo, o guardrail força o prazo oficial.",
+    recentHistory: [
+      "Lead: Cliente enviou uma foto para restaurar.",
+      "Atendente: Pra fazer essa foto fica R$10. Quer que eu te mande o Pix?",
+    ],
+    summary: "[FOTO_RECEBIDA]",
+    batch: [{ content: "Quanto tempo demora?" }],
+    mockModelResponse: "Geralmente fica pronto entre 2 e 5 dias úteis.",
+    expect: {
+      route: "ai_response",
+      required: REQUIRED_DEADLINE_24H,
+      forbidden: [...WRONG_DEADLINE_FORBIDDEN, ...POST_PHOTO_FORBIDDEN],
+      maxMessages: 3,
+    },
+  },
+
+  // ── J) Comprovante recebido persistente ───────────────────────
+  {
+    id: "j_receipt_received_then_already_paid",
+    title: "J) Comprovante já recebido + 'já paguei' → não pedir comprovante de novo",
+    classification: "estado persistente",
+    description:
+      "Depois que o comprovante entrou no summary, 'já paguei' deve reconhecer recebimento e conferência, sem pedir comprovante, Pix ou foto.",
+    recentHistory: [
+      "Atendente: Perfeito. O Pix é:",
+      "Atendente: estudiofotos000@gmail.com",
+      "Atendente: Nome: Lucas Agostini — Nubank",
+      "Lead: Cliente enviou um documento ou comprovante.",
+      "Atendente: Recebi sim 😊 vou conferir aqui e, estando certinho, sigo por aqui com você.",
+    ],
+    summary:
+      "[FOTO_RECEBIDA]\n[PAGAMENTO: COMPROVANTE_RECEBIDO_AGUARDANDO_CONFERENCIA]",
+    batch: [{ content: "Já paguei" }],
+    mockModelResponse: "Me manda o comprovante de novo por favor.",
+    expect: {
+      route: "post_receipt_state",
+      required: [/recebi o comprovante/i, /conferindo/i],
+      forbidden: [...POST_RECEIPT_FORBIDDEN, ...POST_PHOTO_FORBIDDEN],
+      maxMessages: 3,
+    },
+  },
+
+  {
+    id: "k_receipt_received_multiple_questions",
+    title: "K) Pós-comprovante com várias dúvidas → mantém contexto de conferência",
+    classification: "estado persistente + contexto",
+    description:
+      "Várias dúvidas depois do comprovante não podem voltar para venda. Deve falar de conferência, prazo e cuidado.",
+    recentHistory: [
+      "Atendente: Perfeito. O Pix é:",
+      "Atendente: estudiofotos000@gmail.com",
+      "Lead: Cliente enviou um documento ou comprovante.",
+    ],
+    summary:
+      "[FOTO_RECEBIDA]\n[PAGAMENTO: COMPROVANTE_RECEBIDO_AGUARDANDO_CONFERENCIA]",
+    batch: [
+      { content: "já paguei" },
+      { content: "quanto tempo demora?" },
+      { content: "vai ficar bom?" },
+      { content: "você já começou?" },
+    ],
+    mockModelResponse: "Quer que eu te mande o Pix e qual foto você quer começar?",
+    expect: {
+      route: "post_receipt_state",
+      required: [/recebi o comprovante|pedido j[aá] est[aá] separado/i, ...REQUIRED_DEADLINE_24H, /cuidado|natural/i],
+      forbidden: [...POST_RECEIPT_FORBIDDEN, ...POST_PHOTO_FORBIDDEN, ...WRONG_DEADLINE_FORBIDDEN],
+      maxMessages: 3,
+    },
+  },
+
+  {
+    id: "l_invalid_receipt_then_insists_paid",
+    title: "L) Comprovante inválido + insiste 'já paguei' → pedir comprovante visível",
+    classification: "estado persistente",
+    description:
+      "Estado inválido permite pedir reenvio, mas sem Pix, sem foto e sem reiniciar venda.",
+    recentHistory: [
+      "Atendente: Perfeito. O Pix é:",
+      "Atendente: estudiofotos000@gmail.com",
+      "Lead: Cliente enviou uma imagem aleatória.",
+      "Atendente: Recebi a imagem, mas pra confirmar preciso do comprovante com valor, data e recebedor visíveis.",
+    ],
+    summary:
+      "[FOTO_RECEBIDA]\n[PAGAMENTO: COMPROVANTE_INVALIDO_AGUARDANDO_REENVIO]",
+    batch: [{ content: "Já paguei" }],
+    mockModelResponse: "Quer que eu te mande o Pix de novo?",
+    expect: {
+      route: "invalid_receipt_state",
+      required: [/valor/i, /data/i, /recebedor/i],
+      forbidden: [...POST_PIX_FORBIDDEN, ...POST_PHOTO_FORBIDDEN],
+      maxMessages: 2,
     },
   },
 ];

@@ -31,6 +31,10 @@ export const POST_PHOTO_FORBIDDEN: RegExp[] = [
   /manda ela aqui/i,
   /me manda aqui que eu vejo/i,
   /manda aqui que eu vejo/i,
+  /qual foto/i,
+  /qual voc[eê] gostaria de come[cç]ar/i,
+  /qual quer come[cç]ar/i,
+  /que foto voc[eê] quer/i,
 ];
 
 // Proibidas depois que o Pix já foi enviado (não reiniciar a venda).
@@ -55,6 +59,34 @@ export const REQUIRED_ACKNOWLEDGES_SERVICE: RegExp[] = [
 ];
 
 export const REQUIRED_PRICE_10: RegExp[] = [/r\$\s*10\b/i];
+
+export const REQUIRED_DEADLINE_24H: RegExp[] = [/at[eé]\s*24h|at[eé]\s*24\s*horas/i];
+
+export const WRONG_DEADLINE_FORBIDDEN: RegExp[] = [
+  /2\s*a\s*5\s*dias\s*[uú]teis/i,
+  /entre\s*2\s*e\s*5\s*dias/i,
+  /alguns\s+dias\s*[uú]teis/i,
+  /\b2\s*dias\s*[uú]teis?\b/i,
+  /\b5\s*dias\s*[uú]teis?\b/i,
+];
+
+export const POST_RECEIPT_FORBIDDEN: RegExp[] = [
+  /quer que eu te mande o pix/i,
+  /posso te mandar o pix/i,
+  /me manda a foto/i,
+  /manda a foto/i,
+  /envia a foto/i,
+  /qual foto/i,
+  /me manda o comprovante/i,
+  /manda o comprovante/i,
+  /envia o comprovante/i,
+  /pode me mandar o comprovante/i,
+  /pagamento confirmado/i,
+  /pagamento aprovado/i,
+  /j[aá] caiu/i,
+  /j[aá] est[aá] pago/i,
+  /j[aá] comecei/i,
+];
 
 // Linguagem emocional que NÃO deve aparecer se o cliente não trouxe o contexto.
 export const EMOTIONAL_LANGUAGE: RegExp[] = [

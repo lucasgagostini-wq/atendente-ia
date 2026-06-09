@@ -25,9 +25,9 @@ import {
   type PendingInboundMessage,
 } from "../lib/webhook-helpers";
 import {
-  PAYMENT_STAGE_WAITING_RECEIPT,
-  PAYMENT_STAGE_RECEIPT_SENT,
   PAYMENT_STAGE_RECEIPT_NEEDS_REVIEW,
+  PAYMENT_STAGE_RECEIPT_RECEIVED_PENDING_REVIEW,
+  PAYMENT_STAGE_RECEIPT_INVALID,
   detectPaymentIntent,
   detectPaymentReceipt,
   hasRecentPixContext,
@@ -365,21 +365,21 @@ const baseAnalysis = {
   confidence: "high" as const,
 };
 
-test("imagem aleatória (isRandomImage=true) → WAITING_RECEIPT + mensagem de erro", () => {
+test("imagem aleatória (isRandomImage=true) → INVALID + pede comprovante visível", () => {
   const decision = receiptDecisionFromAnalysis({ ...baseAnalysis, isRandomImage: true });
-  assert.equal(decision.stage, PAYMENT_STAGE_WAITING_RECEIPT);
-  assert.match(decision.message, /não consegui identificar/i);
+  assert.equal(decision.stage, PAYMENT_STAGE_RECEIPT_INVALID);
+  assert.match(decision.message, /valor, data e recebedor/i);
   assert.equal(decision.kind, "random_or_unrelated");
 });
 
-test("looksLikePixReceipt=false → WAITING_RECEIPT", () => {
+test("looksLikePixReceipt=false → INVALID", () => {
   const decision = receiptDecisionFromAnalysis({ ...baseAnalysis, looksLikePixReceipt: false });
-  assert.equal(decision.stage, PAYMENT_STAGE_WAITING_RECEIPT);
+  assert.equal(decision.stage, PAYMENT_STAGE_RECEIPT_INVALID);
 });
 
-test("comprovante coerente (todos os matches) → RECEIPT_SENT + mensagem positiva", () => {
+test("comprovante coerente (todos os matches) → RECEIPT_RECEIVED_PENDING_REVIEW + mensagem positiva", () => {
   const decision = receiptDecisionFromAnalysis(baseAnalysis);
-  assert.equal(decision.stage, PAYMENT_STAGE_RECEIPT_SENT);
+  assert.equal(decision.stage, PAYMENT_STAGE_RECEIPT_RECEIVED_PENDING_REVIEW);
   assert.match(decision.message, /Recebi sim/);
   assert.equal(decision.kind, "coherent");
 });
@@ -402,7 +402,7 @@ test("sem banco encontrado mas resto OK → RECEIPT_SENT (bankFound ausente é i
     matchesBank: false,
   });
   // matchesBank false com bankFound null → coreMatches = matchesRecipient && matchesPixKey && matchesAmount && (!bankFound)
-  assert.equal(decision.stage, PAYMENT_STAGE_RECEIPT_SENT);
+  assert.equal(decision.stage, PAYMENT_STAGE_RECEIPT_RECEIVED_PENDING_REVIEW);
 });
 
 test("comprovante sem nome do destinatário → RECEIPT_NEEDS_REVIEW", () => {
@@ -496,14 +496,14 @@ test("CENÁRIO: lead manda foto para restaurar → não entra em rota de comprov
   // seria FALSE (hasRecentPixInHistory = false) → IA normal
 });
 
-test("CENÁRIO: lead envia comprovante com dados válidos → stage RECEIPT_SENT", () => {
+test("CENÁRIO: lead envia comprovante com dados válidos → stage RECEIPT_RECEIVED_PENDING_REVIEW", () => {
   // Simula a análise de visão já feita → decisão
   const analysis = {
     ...baseAnalysis,
     // Todos os dados batem → comprovante válido
   };
   const decision = receiptDecisionFromAnalysis(analysis);
-  assert.equal(decision.stage, PAYMENT_STAGE_RECEIPT_SENT);
+  assert.equal(decision.stage, PAYMENT_STAGE_RECEIPT_RECEIVED_PENDING_REVIEW);
   assert.match(decision.message, /vou conferir aqui/i);
 });
 

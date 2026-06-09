@@ -4,6 +4,7 @@ type SafetyContext = {
   incomingText?: string | null;
   recentHistory?: string[];
   hasPhoto?: boolean;
+  summary?: string | null;
 };
 
 export const PIX_KEY = "estudiofotos000@gmail.com";
@@ -12,6 +13,10 @@ export const PIX_BANK = "Nubank";
 export const PAYMENT_STAGE_WAITING_RECEIPT = "WAITING_PAYMENT_RECEIPT";
 export const PAYMENT_STAGE_RECEIPT_SENT = "PAYMENT_RECEIPT_SENT";
 export const PAYMENT_STAGE_RECEIPT_NEEDS_REVIEW = "RECEIPT_NEEDS_REVIEW";
+export const PAYMENT_STAGE_RECEIPT_RECEIVED_PENDING_REVIEW =
+  "COMPROVANTE_RECEBIDO_AGUARDANDO_CONFERENCIA";
+export const PAYMENT_STAGE_RECEIPT_INVALID =
+  "COMPROVANTE_INVALIDO_AGUARDANDO_REENVIO";
 
 const RECENT_PIX_CONTEXT_PATTERNS = [
   /chave pix/i,
@@ -141,6 +146,14 @@ const PIX_DATA_SENT_PATTERNS = [
 ];
 
 export function pixDataAlreadySent(context: SafetyContext = {}) {
+  if (
+    detectIfWaitingPaymentReceipt(context.summary) ||
+    detectIfPaymentReceiptReceived(context.summary) ||
+    detectIfPaymentReceiptInvalid(context.summary)
+  ) {
+    return true;
+  }
+
   return (context.recentHistory ?? []).some((item) =>
     PIX_DATA_SENT_PATTERNS.some((pattern) => pattern.test(item)),
   );
@@ -160,6 +173,18 @@ export function detectPaymentReceipt(context: SafetyContext = {}) {
 
 export function detectIfWaitingPaymentReceipt(summary?: string | null) {
   return Boolean(summary?.includes(PAYMENT_STAGE_WAITING_RECEIPT));
+}
+
+export function detectIfPaymentReceiptReceived(summary?: string | null) {
+  return Boolean(
+    summary?.includes(PAYMENT_STAGE_RECEIPT_SENT) ||
+      summary?.includes(PAYMENT_STAGE_RECEIPT_NEEDS_REVIEW) ||
+      summary?.includes(PAYMENT_STAGE_RECEIPT_RECEIVED_PENDING_REVIEW),
+  );
+}
+
+export function detectIfPaymentReceiptInvalid(summary?: string | null) {
+  return Boolean(summary?.includes(PAYMENT_STAGE_RECEIPT_INVALID));
 }
 
 // ── Estado persistente de "foto de serviço já recebida" ────────────
@@ -259,7 +284,9 @@ export function updateConversationStage(
   const summary = normalize(currentSummary)
     .replace(/\n?\[PAGAMENTO: WAITING_PAYMENT_RECEIPT\]/g, "")
     .replace(/\n?\[PAGAMENTO: PAYMENT_RECEIPT_SENT\]/g, "")
-    .replace(/\n?\[PAGAMENTO: RECEIPT_NEEDS_REVIEW\]/g, "");
+    .replace(/\n?\[PAGAMENTO: RECEIPT_NEEDS_REVIEW\]/g, "")
+    .replace(/\n?\[PAGAMENTO: COMPROVANTE_RECEBIDO_AGUARDANDO_CONFERENCIA\]/g, "")
+    .replace(/\n?\[PAGAMENTO: COMPROVANTE_INVALIDO_AGUARDANDO_REENVIO\]/g, "");
 
   return [summary, `[PAGAMENTO: ${stage}]`].filter(Boolean).join("\n");
 }
@@ -291,7 +318,9 @@ export function detectConversationStage(context: SafetyContext = {}) {
   const askedPreview = /pr[eé]via|amostra|teste gr[aá]tis|ver antes|antes de pagar/.test(text);
   const askedPrice = /pre[cç]o|valor|quanto|custa|pacote|r\$|pix/.test(text);
   const askedTrust = /confi[aá]vel|confian[cç]a|golpe|garantia|seguro|medo|receio|cara de ia|artificial/.test(text);
+  const askedDeadline = /quanto tempo|prazo|demora|vai demorar|fica pronto|quando fica pronto|entrega|quando entrega/.test(text);
 
+  if (askedDeadline) return "deadline_requested";
   if (askedPreview) return "preview_requested";
   if (askedPrice) return "price_requested";
   if (askedTrust) return "trust_requested";
@@ -345,6 +374,7 @@ export function detectEmotionalContext(context: SafetyContext = {}) {
 function hasPhotoInContext(context: SafetyContext = {}) {
   return (
     Boolean(context.hasPhoto) ||
+    summaryHasServiceImage(context.summary) ||
     /cliente enviou uma foto|foto para restaurar|imagem|photo|image/.test(compactText(context))
   );
 }
@@ -373,6 +403,100 @@ export function buildCommercialInstruction(context: SafetyContext = {}) {
     hasPrice: hasPriceInContext(context),
     mustCloseSale: !isGoodbyeOrHardNo(context),
   };
+}
+
+function isDeadlineQuestion(context: SafetyContext = {}) {
+  return /quanto tempo|prazo|demora|vai demorar|fica pronto|quando fica pronto|entrega|quando entrega/i.test(
+    compactText(context),
+  );
+}
+
+function mentionsPaymentSent(context: SafetyContext = {}) {
+  return /j[aá] paguei|paguei|fiz o pix|enviei|mandei|foi|t[aá] a[ií]|segue|acabei de mandar|confere/i.test(
+    compactText(context),
+  );
+}
+
+function asksIfStarted(context: SafetyContext = {}) {
+  return /j[aá] come[cç]ou|voc[eê] j[aá] come[cç]ou|come[cç]ou|andamento|e agora/i.test(
+    compactText(context),
+  );
+}
+
+function asksQualityAfterReceipt(context: SafetyContext = {}) {
+  return /vai ficar bom|fica bom|qualidade|natural|cara de ia|artificial|mudar o rosto|sem mudar/i.test(
+    compactText(context),
+  );
+}
+
+function normalizeDeadlinePhrases(response: string) {
+  return response
+    .replace(/(?:entre\s*)?2\s*a\s*5\s*dias\s*[uú]teis/gi, "até 24h após confirmação do pagamento")
+    .replace(/alguns\s+dias\s*[uú]teis/gi, "até 24h após confirmação do pagamento")
+    .replace(/\b2\s*dias\s*[uú]teis\b/gi, "até 24h após confirmação do pagamento")
+    .replace(/\b5\s*dias\s*[uú]teis\b/gi, "até 24h após confirmação do pagamento")
+    .replace(/\b2\s*dias\b/gi, "até 24h após confirmação do pagamento")
+    .replace(/\b5\s*dias\b/gi, "até 24h após confirmação do pagamento");
+}
+
+function guardrailReplyForDeadline(context: SafetyContext = {}) {
+  if (!isDeadlineQuestion(context)) return null;
+
+  if (detectIfPaymentReceiptReceived(context.summary)) {
+    return "Fica pronto em até 24h após a confirmação do pagamento.";
+  }
+
+  if (pixDataAlreadySent(context)) {
+    return "O prazo é de até 24h após a confirmação do pagamento.";
+  }
+
+  if (hasPhotoInContext(context)) {
+    return [
+      "O prazo é de até 24h após a confirmação do pagamento.",
+      "Pra fazer essa foto fica R$10. Quer que eu te mande o Pix?",
+    ].join("\n\n");
+  }
+
+  return [
+    "O prazo é de até 24h após a confirmação do pagamento.",
+    "Me manda a foto aqui que eu vejo pra você.",
+  ].join("\n\n");
+}
+
+export function buildPostReceiptResponse(context: SafetyContext = {}) {
+  const messages: string[] = [];
+  const paymentSent = mentionsPaymentSent(context);
+  const started = asksIfStarted(context);
+  const quality = asksQualityAfterReceipt(context);
+  const deadline = isDeadlineQuestion(context);
+
+  if (paymentSent) {
+    messages.push("Sim, recebi o comprovante. Estou conferindo os dados do pagamento por aqui.");
+  }
+
+  if (quality && (deadline || paymentSent)) {
+    messages.push("Vou fazer com cuidado pra manter o rosto natural. O prazo é de até 24h após a confirmação do pagamento.");
+  } else if (quality) {
+    messages.push("Vou fazer com cuidado pra manter o rosto natural e melhorar a foto sem deixar artificial.");
+  }
+
+  if (started) {
+    messages.push("Seu pedido já está separado por aqui. Confirmando certinho o pagamento, sigo com a edição.");
+  }
+
+  if ((deadline || paymentSent || messages.length === 0) && !messages.some((message) => /24h|24 horas/i.test(message))) {
+    messages.push("O prazo é de até 24h após a confirmação do pagamento.");
+  }
+
+  if (messages.length === 0) {
+    messages.push("Seu comprovante já está recebido por aqui. Estou conferindo os dados do pagamento.");
+  }
+
+  return messages.slice(0, 3).join("\n\n");
+}
+
+export function buildInvalidReceiptResponse(_context: SafetyContext = {}) {
+  return "Recebi a imagem, mas pra confirmar preciso do comprovante com valor, data e recebedor visíveis. Pode me reenviar assim?";
 }
 
 function ctaForContext(context: SafetyContext = {}) {
@@ -460,7 +584,7 @@ function removePassiveClosers(response: string) {
 }
 
 function asksForPhotoAgain(response: string) {
-  return /me manda a foto|manda a foto|envia a foto|me envia a foto|manda aqui que eu vejo|envia aqui que eu vejo|pode mandar a foto|mande a foto/i.test(response);
+  return /me manda a foto|manda a foto|envia a foto|me envia a foto|manda aqui que eu vejo|envia aqui que eu vejo|pode mandar a foto|mande a foto|qual foto|qual delas|qual voc[eê] gostaria de come[cç]ar|qual quer come[cç]ar|que foto voc[eê] quer|escolhe a foto/i.test(response);
 }
 
 // Depois que o Pix já foi enviado, a IA NÃO pode reabrir venda (re-ofertar Pix,
@@ -594,6 +718,21 @@ export function normalizeCommercialResponse(response: string, context: SafetyCon
   let output = normalize(response);
   if (!output) return output;
 
+  if (detectIfPaymentReceiptReceived(context.summary)) {
+    return buildPostReceiptResponse(context);
+  }
+
+  if (detectIfPaymentReceiptInvalid(context.summary)) {
+    return buildInvalidReceiptResponse(context);
+  }
+
+  const deadlineReply = guardrailReplyForDeadline(context);
+  if (deadlineReply) {
+    return deadlineReply;
+  }
+
+  output = normalizeDeadlinePhrases(output);
+
   // ── Pós-Pix: jamais reiniciar a venda nem pedir a foto de novo ──
   // Só ativa quando os DADOS do Pix já foram enviados (não na mera oferta).
   if (pixDataAlreadySent(context)) {
@@ -663,6 +802,14 @@ export function ensureSalesCTA(response: string, context: SafetyContext = {}) {
 
   if (!output || isGoodbyeOrHardNo(context)) {
     return output;
+  }
+
+  if (detectIfPaymentReceiptReceived(context.summary)) {
+    return buildPostReceiptResponse(context);
+  }
+
+  if (detectIfPaymentReceiptInvalid(context.summary)) {
+    return buildInvalidReceiptResponse(context);
   }
 
   // Pós-Pix: não anexar CTA de venda. A próxima ação esperada é o comprovante.
@@ -754,6 +901,8 @@ export function safeFallbackForStage(stage: string) {
       return "Entendo sua preocupação. A gente não faz prévia grátis porque o trabalho já começa na restauração da foto.";
     case "trust_requested":
       return "Entendo total. O foco é melhorar com cuidado, sem mudar o rosto. Pra essa fica R$10. Quer que eu te mande o Pix?";
+    case "deadline_requested":
+      return "O prazo é de até 24h após confirmação do pagamento.";
     case "needs_photo":
     default:
       return "Consigo te ajudar sim 😊 me manda a foto que você quer restaurar aqui.";

@@ -22,9 +22,13 @@ import type { PixReceiptAnalysis } from "../../services/payment-receipt.service"
 import {
   conversationHasServiceImage,
   detectIfWaitingPaymentReceipt,
+  detectIfPaymentReceiptInvalid,
+  detectIfPaymentReceiptReceived,
   detectPaymentIntent,
   detectPaymentReceipt,
   detectServiceType,
+  buildInvalidReceiptResponse,
+  buildPostReceiptResponse,
   ensureSalesCTA,
   hasRecentPixContext,
   normalizeCommercialResponse,
@@ -43,7 +47,12 @@ export type ConversationState = {
   mockReceiptAnalysis?: Partial<PixReceiptAnalysis>;
 };
 
-export type SimRoute = "payment_receipt" | "payment_intent" | "ai_response";
+export type SimRoute =
+  | "payment_receipt"
+  | "payment_intent"
+  | "ai_response"
+  | "post_receipt_state"
+  | "invalid_receipt_state";
 
 export type SimResult = {
   route: SimRoute;
@@ -55,6 +64,8 @@ export type SimResult = {
     pixAlreadySent: boolean;
     awaitingReceipt: boolean;
     isReceiptCandidate: boolean;
+    receiptReceived: boolean;
+    receiptInvalid: boolean;
     serviceType: "simple_edit" | "restoration" | "unknown";
     batchHasPhoto: boolean;
   };
@@ -99,6 +110,8 @@ export function simulateConversation(state: ConversationState): SimResult {
 
   const batchedIncomingText = buildAiIncomingTextFromBatch(batch, pixInHistory);
   const isWaitingReceipt = detectIfWaitingPaymentReceipt(summary);
+  const isReceiptReceived = detectIfPaymentReceiptReceived(summary);
+  const isReceiptInvalid = detectIfPaymentReceiptInvalid(summary);
 
   const conversationHasPhoto = conversationHasServiceImage({
     recentHistory,
@@ -111,16 +124,44 @@ export function simulateConversation(state: ConversationState): SimResult {
     askedForPix: detectPaymentIntent({ incomingText: batchedIncomingText, recentHistory, hasPhoto: batchHasPhoto }),
     pixAlreadySent: pixInHistory,
     awaitingReceipt: isWaitingReceipt,
+    receiptReceived: isReceiptReceived,
+    receiptInvalid: isReceiptInvalid,
     isReceiptCandidate: detectPaymentReceipt({ incomingText: batchedIncomingText, recentHistory, hasPhoto: batchHasPhoto }),
     serviceType: detectServiceType({ incomingText: batchedIncomingText, recentHistory, hasPhoto: batchHasPhoto }),
     batchHasPhoto,
   };
 
+  // ── Gate 0: estado persistente pós-comprovante ───────────────
+  if (isReceiptReceived) {
+    const text = buildPostReceiptResponse({
+      incomingText: batchedIncomingText,
+      recentHistory,
+      hasPhoto: conversationHasPhoto,
+      summary,
+    });
+    const messages = splitResponseIntoWhatsAppMessages(text);
+    return { route: "post_receipt_state", messages, finalText: messages.join("\n"), flags };
+  }
+
+  if (isReceiptInvalid && !batchHasPhoto) {
+    const text = buildInvalidReceiptResponse({
+      incomingText: batchedIncomingText,
+      recentHistory,
+      hasPhoto: conversationHasPhoto,
+      summary,
+    });
+    const messages = splitResponseIntoWhatsAppMessages(text);
+    return { route: "invalid_receipt_state", messages, finalText: messages.join("\n"), flags };
+  }
+
   // ── Gate 1: comprovante ──────────────────────────────────────
   if (
-    isWaitingReceipt &&
-    pixInHistory &&
-    detectPaymentReceipt({ incomingText: batchedIncomingText, recentHistory, hasPhoto: batchHasPhoto })
+    (isWaitingReceipt || isReceiptInvalid) &&
+    (pixInHistory || isReceiptInvalid) &&
+    (
+      detectPaymentReceipt({ incomingText: batchedIncomingText, recentHistory, hasPhoto: batchHasPhoto }) ||
+      (isReceiptInvalid && batchHasPhoto)
+    )
   ) {
     let message: string;
     if (batchHasPhoto) {
@@ -144,6 +185,7 @@ export function simulateConversation(state: ConversationState): SimResult {
     incomingText: batchedIncomingText,
     recentHistory: aiRecentHistory,
     hasPhoto: conversationHasPhoto,
+    summary,
   };
 
   const safe = sanitizeAIResponse(state.mockModelResponse ?? "", aiSafetyContext);

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import {
   PAYMENT_STAGE_RECEIPT_NEEDS_REVIEW,
+  PAYMENT_STAGE_RECEIPT_RECEIVED_PENDING_REVIEW,
+  PAYMENT_STAGE_RECEIPT_INVALID,
   PAYMENT_STAGE_RECEIPT_SENT,
   PAYMENT_STAGE_WAITING_RECEIPT,
   PIX_BANK,
@@ -8,9 +10,13 @@ import {
   PIX_NAME,
   SERVICE_IMAGE_SUMMARY_MARKER,
   buildExpectedPaymentData,
+  buildInvalidReceiptResponse,
+  buildPostReceiptResponse,
   conversationHasServiceImage,
   detectEmotionalContext,
   detectIfWaitingPaymentReceipt,
+  detectIfPaymentReceiptInvalid,
+  detectIfPaymentReceiptReceived,
   detectObjectionType,
   detectPaymentIntent,
   detectPaymentReceipt,
@@ -237,6 +243,32 @@ assert.match(
   ),
   /\[PAGAMENTO: RECEIPT_NEEDS_REVIEW\]/,
 );
+assert.match(
+  updateConversationStage(
+    `[PAGAMENTO: ${PAYMENT_STAGE_WAITING_RECEIPT}]`,
+    PAYMENT_STAGE_RECEIPT_RECEIVED_PENDING_REVIEW,
+  ),
+  /\[PAGAMENTO: COMPROVANTE_RECEBIDO_AGUARDANDO_CONFERENCIA\]/,
+);
+assert.match(
+  updateConversationStage(
+    `[PAGAMENTO: ${PAYMENT_STAGE_RECEIPT_RECEIVED_PENDING_REVIEW}]`,
+    PAYMENT_STAGE_RECEIPT_INVALID,
+  ),
+  /\[PAGAMENTO: COMPROVANTE_INVALIDO_AGUARDANDO_REENVIO\]/,
+);
+assert.equal(
+  detectIfPaymentReceiptReceived(`[PAGAMENTO: ${PAYMENT_STAGE_RECEIPT_RECEIVED_PENDING_REVIEW}]`),
+  true,
+);
+assert.equal(
+  detectIfPaymentReceiptReceived(`[PAGAMENTO: ${PAYMENT_STAGE_RECEIPT_SENT}]`),
+  true,
+);
+assert.equal(
+  detectIfPaymentReceiptInvalid(`[PAGAMENTO: ${PAYMENT_STAGE_RECEIPT_INVALID}]`),
+  true,
+);
 assert.deepEqual(
   buildExpectedPaymentData({
     incomingText: "vou pagar",
@@ -315,6 +347,64 @@ assert.deepEqual(specificPhotoPriceMessages, [
   "Dá pra trabalhar nela com cuidado, mantendo o rosto natural e sem deixar artificial.",
   "Pra fazer essa foto fica R$10. Quer que eu te mande o Pix?",
 ]);
+
+const persistedPhotoNoWhichPhoto = splitResponseIntoWhatsAppMessages(
+  normalizeCommercialResponse("Qual foto você gostaria de começar?", {
+    incomingText: "Quanto fica?",
+    recentHistory: [],
+    summary: SERVICE_IMAGE_SUMMARY_MARKER,
+    hasPhoto: true,
+  }),
+);
+assert.doesNotMatch(persistedPhotoNoWhichPhoto.join("\n"), /qual foto|manda a foto|envia a foto/i);
+assert.match(persistedPhotoNoWhichPhoto.join("\n"), /R\$10/);
+
+const deadlineMessages = splitResponseIntoWhatsAppMessages(
+  normalizeCommercialResponse("Fica pronto entre 2 e 5 dias úteis.", {
+    incomingText: "Quanto tempo demora?",
+    recentHistory: ["Lead: Cliente enviou uma foto para restaurar."],
+    summary: SERVICE_IMAGE_SUMMARY_MARKER,
+    hasPhoto: true,
+  }),
+);
+assert.match(deadlineMessages.join("\n"), /até 24h|até 24 horas/i);
+assert.doesNotMatch(deadlineMessages.join("\n"), /2\s*a\s*5|dias úteis/i);
+
+const postReceiptMessages = splitResponseIntoWhatsAppMessages(
+  normalizeCommercialResponse("Me manda o comprovante de novo e eu vejo o Pix.", {
+    incomingText: "Já paguei",
+    recentHistory: [],
+    summary: `[PAGAMENTO: ${PAYMENT_STAGE_RECEIPT_RECEIVED_PENDING_REVIEW}]`,
+    hasPhoto: true,
+  }),
+);
+assert.match(postReceiptMessages.join("\n"), /recebi o comprovante/i);
+assert.match(postReceiptMessages.join("\n"), /conferindo/i);
+assert.match(postReceiptMessages.join("\n"), /até 24h|até 24 horas/i);
+assert.doesNotMatch(postReceiptMessages.join("\n"), /me manda o comprovante|quer que eu te mande o pix|manda a foto/i);
+assert.doesNotMatch(postReceiptMessages.join("\n"), /pagamento confirmado|já caiu|já comecei/i);
+
+const invalidReceiptMessages = splitResponseIntoWhatsAppMessages(
+  normalizeCommercialResponse("Quer que eu te mande o Pix de novo?", {
+    incomingText: "Já paguei",
+    recentHistory: [],
+    summary: `[PAGAMENTO: ${PAYMENT_STAGE_RECEIPT_INVALID}]`,
+    hasPhoto: true,
+  }),
+);
+assert.match(invalidReceiptMessages.join("\n"), /valor/i);
+assert.match(invalidReceiptMessages.join("\n"), /data/i);
+assert.match(invalidReceiptMessages.join("\n"), /recebedor/i);
+assert.doesNotMatch(invalidReceiptMessages.join("\n"), /pix de novo|manda a foto/i);
+
+assert.match(
+  buildPostReceiptResponse({
+    incomingText: "já paguei\nquanto tempo demora?\nvai ficar bom?\nvocê já começou?",
+    summary: `[PAGAMENTO: ${PAYMENT_STAGE_RECEIPT_RECEIVED_PENDING_REVIEW}]`,
+  }),
+  /recebi o comprovante[\s\S]*24h[\s\S]*(cuidado|pedido já está separado)/i,
+);
+assert.match(buildInvalidReceiptResponse(), /valor, data e recebedor/i);
 
 for (const message of specificPhotoPriceMessages) {
   assert.ok(message.length <= 180, `mensagem longa demais: ${message.length}`);

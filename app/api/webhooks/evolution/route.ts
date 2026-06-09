@@ -32,12 +32,16 @@ import {
 } from "@/lib/webhook-helpers";
 import {
   PAYMENT_STAGE_RECEIPT_NEEDS_REVIEW,
-  PAYMENT_STAGE_RECEIPT_SENT,
+  PAYMENT_STAGE_RECEIPT_RECEIVED_PENDING_REVIEW,
   PAYMENT_STAGE_WAITING_RECEIPT,
+  buildInvalidReceiptResponse,
   buildExpectedPaymentData,
+  buildPostReceiptResponse,
   conversationHasServiceImage,
   detectPaymentIntent,
   detectPaymentReceipt,
+  detectIfPaymentReceiptInvalid,
+  detectIfPaymentReceiptReceived,
   detectIfWaitingPaymentReceipt,
   detectServiceType,
   ensureSalesCTA,
@@ -643,6 +647,8 @@ export async function POST(request: Request) {
       }),
     );
     const isWaitingReceipt = detectIfWaitingPaymentReceipt(lead.summary);
+    const isReceiptReceived = detectIfPaymentReceiptReceived(lead.summary);
+    const isReceiptInvalid = detectIfPaymentReceiptInvalid(lead.summary);
     const hasRecentPixInHistory = hasRecentPixContext({
       incomingText: batchedIncomingText,
       recentHistory,
@@ -656,6 +662,18 @@ export async function POST(request: Request) {
       summary: lead.summary,
       hasPhoto: batchHasPhoto,
     });
+
+    // Persiste a marca de "foto recebida" cedo, antes de qualquer gate.
+    // Assim, mesmo se o batch cair em Pix determinístico ou outra rota, o lead
+    // nunca volta a ser tratado como se não tivesse enviado foto.
+    if (batchHasPhoto && !hasRecentPixInHistory && !summaryHasServiceImage(lead.summary)) {
+      const updatedSummary = markServiceImageReceived(lead.summary);
+      lead.summary = updatedSummary;
+      await prisma.lead.update({
+        where: { id: lead.id },
+        data: { summary: updatedSummary },
+      }).catch(() => {});
+    }
 
     const aiDebugFlags = {
       hasServiceImage: conversationHasPhoto,
@@ -693,14 +711,98 @@ export async function POST(request: Request) {
       }).catch(() => {});
     }
 
+    if (isReceiptReceived) {
+      const postReceiptResponse = buildPostReceiptResponse({
+        incomingText: batchedIncomingText,
+        recentHistory,
+        hasPhoto: conversationHasPhoto,
+        summary: lead.summary,
+      });
+      const postReceiptMessages = splitResponseIntoWhatsAppMessages(postReceiptResponse);
+
+      emitAiDebug(
+        buildAiDebugSnapshot({
+          leadId: lead.id,
+          phone: lead.phone,
+          funnelStageBefore: lead.funnelStage,
+          funnelStageAfter: "CHECKOUT",
+          batchSize: batchedInboundMessages.length,
+          flags: aiDebugFlags,
+          consolidatedText: batchedIncomingText,
+          rawResponse: null,
+          finalResponse: postReceiptResponse,
+          route: "payment_receipt:post_receipt_state",
+        }),
+        prisma,
+      );
+
+      const payload = await saveAndSendMessages({
+        conversationId: conversation.id,
+        leadId: lead.id,
+        phone: lead.phone,
+        messages: postReceiptMessages,
+        replyTransport: incoming.replyTransport,
+        typingStartedAt,
+        roundInboundMessageId: inboundMessage.id,
+        metadata: {
+          source: "post_receipt_state",
+          paymentStage: lead.summary,
+        } as Prisma.InputJsonValue,
+      });
+
+      return NextResponse.json(payload);
+    }
+
+    if (isReceiptInvalid && !batchHasPhoto) {
+      const invalidReceiptResponse = buildInvalidReceiptResponse({
+        incomingText: batchedIncomingText,
+        recentHistory,
+        hasPhoto: conversationHasPhoto,
+        summary: lead.summary,
+      });
+      const invalidReceiptMessages = splitResponseIntoWhatsAppMessages(invalidReceiptResponse);
+
+      emitAiDebug(
+        buildAiDebugSnapshot({
+          leadId: lead.id,
+          phone: lead.phone,
+          funnelStageBefore: lead.funnelStage,
+          funnelStageAfter: "CHECKOUT",
+          batchSize: batchedInboundMessages.length,
+          flags: aiDebugFlags,
+          consolidatedText: batchedIncomingText,
+          rawResponse: null,
+          finalResponse: invalidReceiptResponse,
+          route: "payment_receipt:invalid_receipt_state",
+        }),
+        prisma,
+      );
+
+      const payload = await saveAndSendMessages({
+        conversationId: conversation.id,
+        leadId: lead.id,
+        phone: lead.phone,
+        messages: invalidReceiptMessages,
+        replyTransport: incoming.replyTransport,
+        typingStartedAt,
+        roundInboundMessageId: inboundMessage.id,
+        metadata: {
+          source: "invalid_receipt_state",
+          paymentStage: lead.summary,
+        } as Prisma.InputJsonValue,
+      });
+
+      return NextResponse.json(payload);
+    }
+
     if (
-      isWaitingReceipt &&
-      hasRecentPixInHistory &&
-      detectPaymentReceipt({
+      (isWaitingReceipt || isReceiptInvalid) &&
+      (hasRecentPixInHistory || isReceiptInvalid) &&
+      (detectPaymentReceipt({
         incomingText: batchedIncomingText,
         recentHistory,
         hasPhoto: batchHasPhoto,
-      })
+      }) || (isReceiptInvalid && batchHasPhoto))
     ) {
       let receiptResult: {
         text: string;
@@ -725,7 +827,7 @@ export async function POST(request: Request) {
         receiptResult = {
           text:
             "Recebi sim 😊 vou conferir aqui e, estando certinho, sigo por aqui com você.",
-          stage: PAYMENT_STAGE_RECEIPT_SENT,
+          stage: PAYMENT_STAGE_RECEIPT_RECEIVED_PENDING_REVIEW,
           analysis: null,
           decision: "text_receipt_fallback",
         };
@@ -735,7 +837,7 @@ export async function POST(request: Request) {
           data: {
             funnelStage: "CHECKOUT",
             status: "NEGOTIATION",
-            summary: updateConversationStage(lead.summary, PAYMENT_STAGE_RECEIPT_SENT),
+            summary: updateConversationStage(lead.summary, PAYMENT_STAGE_RECEIPT_RECEIVED_PENDING_REVIEW),
           },
         });
 
@@ -745,7 +847,7 @@ export async function POST(request: Request) {
           phone: lead.phone,
           message: "Lead informou pagamento por texto. Conferir pagamento manualmente.",
           analysis: null,
-          stage: PAYMENT_STAGE_RECEIPT_SENT,
+          stage: receiptResult.stage,
           incomingType: batchHasPhoto ? "IMAGE" : incoming.type,
         });
       }
@@ -865,6 +967,7 @@ export async function POST(request: Request) {
       incomingText: aiIncomingText,
       recentHistory: aiRecentHistory,
       hasPhoto: conversationHasPhoto,
+      summary: lead.summary,
     };
 
     const systemPrompt = promptService.composeSystemPrompt({

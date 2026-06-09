@@ -15,6 +15,8 @@ import {
   PAYMENT_STAGE_WAITING_RECEIPT,
   PAYMENT_STAGE_RECEIPT_SENT,
   PAYMENT_STAGE_RECEIPT_NEEDS_REVIEW,
+  PAYMENT_STAGE_RECEIPT_RECEIVED_PENDING_REVIEW,
+  PAYMENT_STAGE_RECEIPT_INVALID,
 } from "@/services/ai-safety.service";
 import type { PixReceiptAnalysis } from "@/services/payment-receipt.service";
 
@@ -41,7 +43,9 @@ export type PendingInboundMessage = {
 export type ReceiptPaymentStage =
   | typeof PAYMENT_STAGE_WAITING_RECEIPT
   | typeof PAYMENT_STAGE_RECEIPT_SENT
-  | typeof PAYMENT_STAGE_RECEIPT_NEEDS_REVIEW;
+  | typeof PAYMENT_STAGE_RECEIPT_NEEDS_REVIEW
+  | typeof PAYMENT_STAGE_RECEIPT_RECEIVED_PENDING_REVIEW
+  | typeof PAYMENT_STAGE_RECEIPT_INVALID;
 
 // ── Funções ─────────────────────────────────────────────────────
 
@@ -163,9 +167,9 @@ export function receiptDecisionFromAnalysis(analysis: PixReceiptAnalysis): {
 } {
   if (analysis.isRandomImage || !analysis.looksLikePixReceipt) {
     return {
-      stage: PAYMENT_STAGE_WAITING_RECEIPT,
+      stage: PAYMENT_STAGE_RECEIPT_INVALID,
       message:
-        "Recebi a imagem, mas não consegui identificar como comprovante do PIX. Pode me mandar o comprovante com valor, data e recebedor visíveis, por favor?",
+        "Recebi a imagem, mas pra confirmar preciso do comprovante com valor, data e recebedor visíveis. Pode me reenviar assim?",
       alert: "Lead enviou imagem que não parece comprovante.",
       kind: "random_or_unrelated",
     };
@@ -179,7 +183,7 @@ export function receiptDecisionFromAnalysis(analysis: PixReceiptAnalysis): {
 
   if (coreMatches && !analysis.suspiciousOrUnclear) {
     return {
-      stage: PAYMENT_STAGE_RECEIPT_SENT,
+      stage: PAYMENT_STAGE_RECEIPT_RECEIVED_PENDING_REVIEW,
       message:
         "Recebi sim 😊 vou conferir aqui e, estando certinho, sigo por aqui com você.",
       alert: "Comprovante recebido e parece coerente. Conferir pagamento manualmente.",
