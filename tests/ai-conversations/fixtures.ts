@@ -218,7 +218,30 @@ export const fixtures: Fixture[] = [
     },
   },
 
-  // ── H) Foto persistida no summary ─────────────────────────────
+  // ── H) Lead quente vindo de anúncio ───────────────────────────
+  {
+    id: "h_ad_lead_without_photo_asks_photo_first",
+    title: "H) Lead de anúncio sem foto → trata como restauração e pede a foto",
+    classification: "prompt + contexto",
+    description:
+      "Mensagem pronta de anúncio deve ser tratada como intenção clara de restaurar foto antiga. Sem foto recebida, pede a foto curto e não manda Pix antes.",
+    recentHistory: [],
+    batch: [
+      {
+        content:
+          "Olá, vi o anúncio sobre restauração de fotos e gostaria de restaurar uma imagem.",
+      },
+    ],
+    mockModelResponse: "Claro, eu te ajudo com restauração de foto antiga.",
+    expect: {
+      route: "ai_response",
+      required: [/restaura/i, /foto/i],
+      forbidden: [/pix/i, ...ALWAYS_FORBIDDEN],
+      maxMessages: 2,
+    },
+  },
+
+  // ── I) Foto persistida no summary ─────────────────────────────
   {
     id: "h_photo_persisted_never_ask_which_photo",
     title: "H) Foto já recebida no estado → nunca perguntar qual foto começar",
@@ -241,7 +264,7 @@ export const fixtures: Fixture[] = [
     },
   },
 
-  // ── I) Prazo oficial ──────────────────────────────────────────
+  // ── J) Prazo oficial ──────────────────────────────────────────
   {
     id: "i_deadline_is_24h",
     title: "I) Pergunta prazo → sempre até 24h, nunca 2 a 5 dias úteis",

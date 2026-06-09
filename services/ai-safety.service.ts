@@ -314,7 +314,8 @@ export function detectConversationStage(context: SafetyContext = {}) {
   const text = compactText(context);
   const hasPhoto =
     Boolean(context.hasPhoto) ||
-    /cliente enviou uma foto|foto para restaurar|imagem|photo|image/.test(text);
+    summaryHasServiceImage(context.summary) ||
+    /cliente (j[aá] )?enviou uma foto|cliente (j[aá] )?enviou uma imagem|foto para restaurar|\[cliente.*foto/.test(text);
   const askedPreview = /pr[eé]via|amostra|teste gr[aá]tis|ver antes|antes de pagar/.test(text);
   const askedPrice = /pre[cç]o|valor|quanto|custa|pacote|r\$|pix/.test(text);
   const askedTrust = /confi[aá]vel|confian[cç]a|golpe|garantia|seguro|medo|receio|cara de ia|artificial/.test(text);
@@ -375,7 +376,7 @@ function hasPhotoInContext(context: SafetyContext = {}) {
   return (
     Boolean(context.hasPhoto) ||
     summaryHasServiceImage(context.summary) ||
-    /cliente enviou uma foto|foto para restaurar|imagem|photo|image/.test(compactText(context))
+    /cliente (j[aá] )?enviou uma foto|cliente (j[aá] )?enviou uma imagem|foto para restaurar|\[cliente.*foto/i.test(compactText(context))
   );
 }
 
