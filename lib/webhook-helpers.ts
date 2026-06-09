@@ -12,6 +12,14 @@
 
 import { Prisma } from "@prisma/client";
 import {
+  getMediaPlaceholder,
+  isMediaKind,
+  isReceiptAttachmentMediaKind,
+  isServicePhotoMediaKind,
+  normalizeMediaKind,
+  type WhatsAppMediaKind,
+} from "@/lib/message-media";
+import {
   PAYMENT_STAGE_WAITING_RECEIPT,
   PAYMENT_STAGE_RECEIPT_SENT,
   PAYMENT_STAGE_RECEIPT_NEEDS_REVIEW,
@@ -27,8 +35,20 @@ export type IncomingPayload = {
   text: string;
   messageId: string | null;
   type: "TEXT" | "IMAGE" | "AUDIO";
+  mediaKind: WhatsAppMediaKind;
   imageUrlOrBase64?: string | null;
   replyTransport?: "baileys_bridge" | "evolution";
+  senderName?: string;
+  metadata?: Prisma.InputJsonValue;
+};
+
+export type OutgoingPayload = {
+  phone: string;
+  text: string;
+  messageId: string | null;
+  type: "TEXT" | "IMAGE" | "AUDIO";
+  mediaKind: WhatsAppMediaKind;
+  imageUrlOrBase64?: string | null;
   senderName?: string;
   metadata?: Prisma.InputJsonValue;
 };
@@ -37,6 +57,8 @@ export type PendingInboundMessage = {
   id: string;
   content: string;
   type: "TEXT" | "IMAGE" | "AUDIO";
+  mediaKind?: WhatsAppMediaKind;
+  metadata?: Prisma.JsonValue | null;
   createdAt: Date;
 };
 
@@ -55,33 +77,40 @@ export function normalizePhone(raw: string): string {
 }
 
 /** Extrai os campos relevantes do payload da Evolution API / Baileys */
-export function extractIncomingPayload(payload: any): IncomingPayload | null {
-  const messageNode =
+function extractMessageNode(payload: any) {
+  return (
     payload?.data?.message ||
     payload?.data?.messages?.[0]?.message ||
     payload?.message ||
-    payload?.messages?.[0]?.message;
+    payload?.messages?.[0]?.message
+  );
+}
 
-  const keyNode =
+function extractKeyNode(payload: any) {
+  return (
     payload?.data?.key ||
     payload?.data?.messages?.[0]?.key ||
     payload?.key ||
-    payload?.messages?.[0]?.key;
+    payload?.messages?.[0]?.key
+  );
+}
 
-  const remoteJid =
+function extractRemoteJid(payload: any, keyNode: any) {
+  return (
     keyNode?.remoteJid ||
     payload?.data?.sender ||
     payload?.sender ||
     payload?.from ||
-    "";
-  const payloadPhone =
-    payload?.data?.phone ||
-    payload?.phone ||
-    payload?.data?.number ||
-    payload?.number ||
-    "";
-  const mediaNode = payload?.data?.media || payload?.media || null;
-  const imageUrlOrBase64 =
+    ""
+  );
+}
+
+function extractMediaNode(payload: any) {
+  return payload?.data?.media || payload?.media || null;
+}
+
+function extractMediaUrlOrBase64(payload: any, mediaNode: any) {
+  return (
     mediaNode?.mediaBase64 ||
     mediaNode?.base64 ||
     mediaNode?.url ||
@@ -91,76 +120,153 @@ export function extractIncomingPayload(payload: any): IncomingPayload | null {
     payload?.mediaBase64 ||
     payload?.base64 ||
     payload?.mediaUrl ||
-    null;
+    null
+  );
+}
 
-  // Ignorar se não tem remetente ou é mensagem própria
-  if (!remoteJid) return null;
-  if (keyNode?.fromMe) return null;
+function resolveMessageClassification(messageNode: any): {
+  dbType: "TEXT" | "IMAGE" | "AUDIO";
+  mediaKind: WhatsAppMediaKind;
+  text: string;
+} {
+  const mediaKind = messageNode?.imageMessage
+    ? "IMAGE"
+    : messageNode?.audioMessage
+      ? "AUDIO"
+      : messageNode?.documentMessage
+        ? "DOCUMENT"
+        : messageNode?.videoMessage
+          ? "VIDEO"
+          : messageNode?.stickerMessage
+            ? "STICKER"
+            : "TEXT";
 
-  // Ignorar mensagens de grupos
-  if (remoteJid.endsWith("@g.us")) return null;
+  const dbType =
+    mediaKind === "AUDIO"
+      ? "AUDIO"
+      : mediaKind === "TEXT"
+        ? "TEXT"
+        : "IMAGE";
 
-  let text =
+  const rawText =
     messageNode?.conversation ||
     messageNode?.extendedTextMessage?.text ||
     messageNode?.imageMessage?.caption ||
     messageNode?.documentMessage?.caption ||
+    messageNode?.videoMessage?.caption ||
     messageNode?.audioMessage?.caption ||
     "";
 
-  let type: IncomingPayload["type"] = "TEXT";
-  if (messageNode?.imageMessage) type = "IMAGE";
-  if (messageNode?.documentMessage) type = "IMAGE";
-  if (messageNode?.audioMessage) type = "AUDIO";
+  const text =
+    typeof rawText === "string" && rawText.trim().length > 0
+      ? rawText.trim()
+      : mediaKind === "TEXT"
+        ? ""
+        : getMediaPlaceholder(mediaKind);
 
-  if ((!text || typeof text !== "string" || text.trim().length === 0) && type === "IMAGE") {
-    text = messageNode?.documentMessage
-      ? "Cliente enviou um documento ou comprovante."
-      : "Cliente enviou uma foto para restaurar.";
-  }
+  return {
+    dbType,
+    mediaKind,
+    text,
+  };
+}
 
-  // Áudio sem legenda/transcrição: injeta marcador para não ser descartado.
-  // O webhook responde pedindo confirmação por escrito (nunca inventa o áudio).
-  if ((!text || typeof text !== "string" || text.trim().length === 0) && type === "AUDIO") {
-    text = "Cliente enviou um áudio.";
-  }
+function buildMetadata(args: {
+  payload: any;
+  keyNode: any;
+  remoteJid: string;
+  phone: string;
+  mediaNode: any;
+  mediaKind: WhatsAppMediaKind;
+}) {
+  return {
+    event: args.payload?.event || args.payload?.data?.event || null,
+    key: args.keyNode ?? null,
+    remoteJid: args.remoteJid,
+    resolvedPhone: args.phone,
+    media: isMediaKind(args.mediaKind)
+      ? {
+          kind: args.mediaKind,
+          mimetype: args.mediaNode?.mimetype ?? null,
+          fileName: args.mediaNode?.fileName ?? args.mediaNode?.filename ?? null,
+          sizeBytes: args.mediaNode?.sizeBytes ?? args.mediaNode?.fileLength ?? null,
+          hasMediaBase64: Boolean(args.mediaNode?.mediaBase64 || args.mediaNode?.base64),
+          hasMediaUrl: Boolean(args.mediaNode?.url),
+          url: args.mediaNode?.url ?? null,
+          storagePath: args.mediaNode?.storagePath ?? null,
+          uploadFailed: Boolean(args.mediaNode?.uploadFailed),
+          mediaDownloadError: args.mediaNode?.mediaDownloadError ?? null,
+        }
+      : null,
+  } as Prisma.InputJsonValue;
+}
 
-  if (!text || typeof text !== "string" || text.trim().length === 0) return null;
+function extractPayload(
+  payload: any,
+  options: { requireFromMe: boolean },
+): (IncomingPayload | OutgoingPayload) | null {
+  const messageNode =
+    extractMessageNode(payload);
+  const keyNode = extractKeyNode(payload);
+  const remoteJid = extractRemoteJid(payload, keyNode);
+  const payloadPhone =
+    payload?.data?.phone ||
+    payload?.phone ||
+    payload?.data?.number ||
+    payload?.number ||
+    "";
+  const mediaNode = extractMediaNode(payload);
+  const imageUrlOrBase64 = extractMediaUrlOrBase64(payload, mediaNode);
+
+  // Ignorar se não tem remetente
+  if (!remoteJid) return null;
+
+  const isFromMe = Boolean(keyNode?.fromMe);
+  if (options.requireFromMe ? !isFromMe : isFromMe) return null;
+
+  // Ignorar mensagens de grupos
+  if (remoteJid.endsWith("@g.us")) return null;
+
+  const classification = resolveMessageClassification(messageNode);
+  const text = classification.text;
+  if (!text) return null;
 
   const phone = normalizePhone(payloadPhone || remoteJid);
   if (!phone) return null;
 
   return {
     phone,
-    text: text.trim(),
+    text,
     messageId: keyNode?.id ?? null,
-    type,
+    type: classification.dbType,
+    mediaKind: classification.mediaKind,
     imageUrlOrBase64: typeof imageUrlOrBase64 === "string" ? imageUrlOrBase64 : null,
     replyTransport:
       payload?.data?.replyTransport === "baileys_bridge"
         ? "baileys_bridge"
         : "evolution",
     senderName: payload?.data?.pushName || payload?.pushName || undefined,
-    metadata: {
-      event: payload?.event || payload?.data?.event || null,
-      key: keyNode ?? null,
+    metadata: buildMetadata({
+      payload,
+      keyNode,
       remoteJid,
-      resolvedPhone: phone,
-      media: mediaNode
-        ? {
-            mimetype: mediaNode.mimetype ?? null,
-            fileName: mediaNode.fileName ?? null,
-            hasMediaBase64: Boolean(mediaNode.mediaBase64 || mediaNode.base64),
-            hasMediaUrl: Boolean(mediaNode.url),
-            mediaDownloadError: mediaNode.mediaDownloadError ?? null,
-          }
-        : null,
-    } as Prisma.InputJsonValue,
+      phone,
+      mediaNode,
+      mediaKind: classification.mediaKind,
+    }),
   };
 }
 
+export function extractIncomingPayload(payload: any): IncomingPayload | null {
+  return extractPayload(payload, { requireFromMe: false }) as IncomingPayload | null;
+}
+
+export function extractOutgoingPayload(payload: any): OutgoingPayload | null {
+  return extractPayload(payload, { requireFromMe: true }) as OutgoingPayload | null;
+}
+
 // Marcador de áudio sem transcrição (injetado em extractIncomingPayload).
-export const AUDIO_PLACEHOLDER_PATTERN = /^cliente enviou um [aá]udio\.?$/i;
+export const AUDIO_PLACEHOLDER_PATTERN = /^🎙️ áudio anexado|^cliente enviou um [aá]udio\.?$/i;
 
 /**
  * Verdadeiro quando o batch é composto SÓ de áudios e nenhum deles tem
@@ -169,8 +275,24 @@ export const AUDIO_PLACEHOLDER_PATTERN = /^cliente enviou um [aá]udio\.?$/i;
  */
 export function isAudioOnlyBatchWithoutTranscription(messages: PendingInboundMessage[]): boolean {
   if (messages.length === 0) return false;
-  if (!messages.every((message) => message.type === "AUDIO")) return false;
+  if (!messages.every((message) => message.mediaKind === "AUDIO" || message.type === "AUDIO")) return false;
   return messages.every((message) => AUDIO_PLACEHOLDER_PATTERN.test(message.content.trim()));
+}
+
+export function getPendingMessageMediaKind(message: PendingInboundMessage): WhatsAppMediaKind {
+  const metadataMedia = (message.metadata as { media?: { kind?: unknown } } | null | undefined)?.media;
+  if (metadataMedia?.kind) return normalizeMediaKind(metadataMedia.kind);
+  if (message.type === "AUDIO") return "AUDIO";
+  if (message.type === "IMAGE") return "IMAGE";
+  return "TEXT";
+}
+
+export function isPendingMessageServicePhoto(message: PendingInboundMessage) {
+  return isServicePhotoMediaKind(getPendingMessageMediaKind(message));
+}
+
+export function isPendingMessageReceiptAttachment(message: PendingInboundMessage) {
+  return isReceiptAttachmentMediaKind(getPendingMessageMediaKind(message));
 }
 
 /** Verifica se a mensagem deve ser transferida para humano */
@@ -256,7 +378,7 @@ export function buildAiIncomingTextFromBatch(
   hasRecentPixInHistory: boolean,
 ) {
   const joinedText = dedupeBatchParts(inboundMessages.map((message) => message.content.trim())).join("\n");
-  const hasPhoto = inboundMessages.some((message) => message.type === "IMAGE");
+  const hasPhoto = inboundMessages.some((message) => isPendingMessageServicePhoto(message));
   const notes: string[] = [];
 
   if (hasPhoto && !hasRecentPixInHistory) {
@@ -273,13 +395,14 @@ export function buildAiIncomingTextFromBatch(
   }
 
   const parts = inboundMessages.flatMap((message) => {
-    if (message.type === "IMAGE") {
+    if (isPendingMessageServicePhoto(message)) {
       return [buildAiIncomingText(
         {
           phone: "",
           text: message.content,
           messageId: message.id,
           type: "IMAGE",
+          mediaKind: "IMAGE",
         },
         hasRecentPixInHistory,
       )];

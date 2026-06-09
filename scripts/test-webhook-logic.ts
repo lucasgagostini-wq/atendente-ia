@@ -17,6 +17,7 @@
 import assert from "node:assert/strict";
 import {
   extractIncomingPayload,
+  extractOutgoingPayload,
   shouldTransferToHuman,
   buildAiIncomingText,
   buildAiIncomingTextFromBatch,
@@ -119,7 +120,8 @@ test("parseia imageMessage sem caption como 'foto para restaurar'", () => {
   });
   assert.notEqual(result, null);
   assert.equal(result!.type, "IMAGE");
-  assert.match(result!.text, /foto para restaurar/i);
+  assert.equal(result!.mediaKind, "IMAGE");
+  assert.match(result!.text, /imagem anexada|foto para restaurar/i);
 });
 
 test("parseia documentMessage sem caption como 'documento ou comprovante'", () => {
@@ -132,7 +134,64 @@ test("parseia documentMessage sem caption como 'documento ou comprovante'", () =
   });
   assert.notEqual(result, null);
   assert.equal(result!.type, "IMAGE");
-  assert.match(result!.text, /documento ou comprovante/i);
+  assert.match(result!.text, /documento anexado|documento ou comprovante/i);
+  assert.equal(result!.mediaKind, "DOCUMENT");
+});
+
+test("parseia audioMessage sem texto como placeholder de áudio", () => {
+  const result = extractIncomingPayload({
+    data: {
+      key: { remoteJid: "5519999111111@s.whatsapp.net", fromMe: false, id: "aud001" },
+      message: { audioMessage: {} },
+      phone: "5519999111111",
+    },
+  });
+  assert.notEqual(result, null);
+  assert.equal(result!.type, "AUDIO");
+  assert.equal(result!.mediaKind, "AUDIO");
+  assert.match(result!.text, /áudio anexado|cliente enviou um áudio/i);
+});
+
+test("parseia videoMessage com placeholder de vídeo", () => {
+  const result = extractIncomingPayload({
+    data: {
+      key: { remoteJid: "5519999111111@s.whatsapp.net", fromMe: false, id: "vid001" },
+      message: { videoMessage: {} },
+      phone: "5519999111111",
+    },
+  });
+  assert.notEqual(result, null);
+  assert.equal(result!.type, "IMAGE");
+  assert.equal(result!.mediaKind, "VIDEO");
+  assert.match(result!.text, /vídeo anexado/i);
+});
+
+test("parseia stickerMessage com placeholder de sticker", () => {
+  const result = extractIncomingPayload({
+    data: {
+      key: { remoteJid: "5519999111111@s.whatsapp.net", fromMe: false, id: "stk001" },
+      message: { stickerMessage: {} },
+      phone: "5519999111111",
+    },
+  });
+  assert.notEqual(result, null);
+  assert.equal(result!.type, "IMAGE");
+  assert.equal(result!.mediaKind, "STICKER");
+  assert.match(result!.text, /sticker anexado/i);
+});
+
+test("parseia mensagem outbound/manual (fromMe=true) para sincronizar no painel", () => {
+  const result = extractOutgoingPayload({
+    data: {
+      key: { remoteJid: "5519999111111@s.whatsapp.net", fromMe: true, id: "out001" },
+      message: { conversation: "te respondi por aqui" },
+      phone: "5519999111111",
+    },
+  });
+  assert.notEqual(result, null);
+  assert.equal(result!.type, "TEXT");
+  assert.equal(result!.mediaKind, "TEXT");
+  assert.equal(result!.text, "te respondi por aqui");
 });
 
 test("normaliza telefone removendo caracteres não-numéricos do JID", () => {
@@ -207,6 +266,7 @@ const makeIncoming = (
   text,
   messageId: "x",
   type,
+  mediaKind: type,
 });
 
 test("TEXT sem contexto PIX → texto como está", () => {

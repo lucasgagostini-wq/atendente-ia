@@ -1,10 +1,14 @@
 "use client";
 
+import Image from "next/image";
 import { FormEvent, useEffect, useRef, useMemo, useState } from "react";
 import {
+  ExternalLink,
   Archive,
   Bot,
+  FileText,
   MessageSquarePlus,
+  Play,
   Search,
   Send,
   UserRound,
@@ -27,7 +31,12 @@ import { useAppStore } from "@/store/app-store";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Conversation, Message } from "@/types";
+import {
+  getMediaPlaceholder,
+  normalizeMediaKind,
+  resolveMessagePreviewText,
+} from "@/lib/message-media";
+import { Conversation, Message, MessageMediaKind, MessageMediaMetadata } from "@/types";
 
 // ─── Helpers ──────────────────────────────────────────────
 
@@ -95,6 +104,37 @@ function formatRelativeConversationTime(dateStr: string, now: number): string {
   return format(new Date(dateStr), "dd/MM");
 }
 
+function getMessageMedia(message: Message): MessageMediaMetadata | null {
+  const metadata = message.metadata as { media?: MessageMediaMetadata | null } | null | undefined;
+  if (!metadata?.media) return null;
+
+  return {
+    ...metadata.media,
+    kind: normalizeMediaKind(metadata.media.kind),
+  };
+}
+
+function getMessageMediaKind(message: Message): MessageMediaKind {
+  const media = getMessageMedia(message);
+  if (media?.kind) return media.kind;
+  if (message.type === "AUDIO") return "AUDIO";
+  if (message.type === "IMAGE") return "IMAGE";
+  return "TEXT";
+}
+
+function getConversationPreview(message: Message) {
+  return resolveMessagePreviewText({
+    content: message.content,
+    mediaKind: getMessageMediaKind(message),
+  });
+}
+
+function hasNonPlaceholderText(message: Message, mediaKind: MessageMediaKind) {
+  const content = String(message.content || "").trim();
+  if (!content) return false;
+  return content !== getMediaPlaceholder(mediaKind);
+}
+
 function Initials({ name }: { name: string }) {
   return (
     <div className="grid size-7 shrink-0 place-items-center rounded-full bg-zinc-800 text-xs font-semibold text-zinc-400 ring-1 ring-zinc-700/50">
@@ -112,6 +152,100 @@ function TypingIndicator() {
         <span aria-hidden="true" className="typing-dot size-1.5 rounded-full bg-zinc-400" />
       </div>
     </div>
+  );
+}
+
+function MessageAttachment({ message }: { message: Message }) {
+  const media = getMessageMedia(message);
+  const mediaKind = getMessageMediaKind(message);
+  const mediaUrl = media?.url || null;
+  const placeholder = getMediaPlaceholder(mediaKind);
+
+  if (mediaKind === "TEXT") return null;
+
+  if (mediaKind === "IMAGE" || mediaKind === "STICKER") {
+    if (mediaUrl) {
+      return (
+        <a
+          href={mediaUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="group block overflow-hidden rounded-xl border border-zinc-700/60 bg-zinc-950/40"
+        >
+          <Image
+            src={mediaUrl}
+            alt={placeholder}
+            width={960}
+            height={960}
+            unoptimized
+            className="max-h-72 w-full object-cover transition-transform group-hover:scale-[1.01]"
+          />
+        </a>
+      );
+    }
+
+    return (
+      <div className="rounded-xl border border-dashed border-zinc-700/70 bg-zinc-950/30 px-3 py-2 text-xs text-zinc-300">
+        {placeholder}
+      </div>
+    );
+  }
+
+  if (mediaKind === "AUDIO") {
+    if (mediaUrl) {
+      return (
+        <audio controls preload="none" className="h-10 w-full min-w-[220px] max-w-[320px]">
+          <source src={mediaUrl} type={media?.mimetype || "audio/ogg"} />
+        </audio>
+      );
+    }
+
+    return (
+      <div className="flex items-center gap-2 rounded-xl border border-dashed border-zinc-700/70 bg-zinc-950/30 px-3 py-2 text-xs text-zinc-300">
+        <Play className="size-3.5" />
+        {placeholder}
+      </div>
+    );
+  }
+
+  if (mediaKind === "VIDEO") {
+    if (mediaUrl) {
+      return (
+        <video
+          controls
+          preload="metadata"
+          className="max-h-72 w-full rounded-xl border border-zinc-700/60 bg-black"
+        >
+          <source src={mediaUrl} type={media?.mimetype || "video/mp4"} />
+        </video>
+      );
+    }
+
+    return (
+      <div className="rounded-xl border border-dashed border-zinc-700/70 bg-zinc-950/30 px-3 py-2 text-xs text-zinc-300">
+        {placeholder}
+      </div>
+    );
+  }
+
+  return (
+    <a
+      href={mediaUrl || undefined}
+      target={mediaUrl ? "_blank" : undefined}
+      rel={mediaUrl ? "noreferrer" : undefined}
+      className="flex items-center gap-2 rounded-xl border border-zinc-700/60 bg-zinc-950/40 px-3 py-2 text-left text-xs text-zinc-200"
+    >
+      <FileText className="size-4 shrink-0 text-zinc-400" />
+      <div className="min-w-0">
+        <p className="truncate font-medium">
+          {media?.fileName || placeholder}
+        </p>
+        <p className="truncate text-zinc-500">
+          {media?.mimetype || placeholder}
+        </p>
+      </div>
+      {mediaUrl && <ExternalLink className="ml-auto size-3.5 shrink-0 text-zinc-500" />}
+    </a>
   );
 }
 
@@ -381,7 +515,7 @@ export default function ConversasPage() {
                         {latest.direction === "OUTBOUND" && (
                           <span className="text-zinc-600">Você: </span>
                         )}
-                        {latest.content}
+                        {getConversationPreview(latest)}
                       </p>
                     )}
                   </div>
@@ -493,6 +627,8 @@ export default function ConversasPage() {
                   const showTime = shouldShowTimestamp(msg, prev);
                   const isAi = msg.role === "ASSISTANT";
                   const isHuman = msg.role === "HUMAN";
+                  const mediaKind = getMessageMediaKind(msg);
+                  const showText = hasNonPlaceholderText(msg, mediaKind);
 
                   return (
                     <div key={msg.id} className="animate-fade-in-up">
@@ -518,7 +654,7 @@ export default function ConversasPage() {
                           </div>
                         )}
 
-                        <div className="flex flex-col gap-0.5" style={{ maxWidth: "72%" }}>
+                        <div className="flex flex-col gap-1" style={{ maxWidth: "72%" }}>
                           <div
                             className={`relative px-3.5 py-2.5 text-sm leading-relaxed transition-colors ${
                               inbound
@@ -540,7 +676,14 @@ export default function ConversasPage() {
                                   }`
                             }`}
                           >
-                            {msg.content}
+                            <div className="space-y-2">
+                              <MessageAttachment message={msg} />
+                              {showText && (
+                                <p className="whitespace-pre-wrap break-words">
+                                  {msg.content}
+                                </p>
+                              )}
+                            </div>
                           </div>
 
                           {/* Meta row */}

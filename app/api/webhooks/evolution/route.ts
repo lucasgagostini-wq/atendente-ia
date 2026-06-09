@@ -19,10 +19,12 @@ import { paymentReceiptService } from "@/services/payment-receipt.service";
 import type { PixReceiptAnalysis } from "@/services/payment-receipt.service";
 import { promptService } from "@/services/prompt.service";
 import {
-  buildAiIncomingText,
   buildAiIncomingTextFromBatch,
   dedupeBatchParts,
+  extractOutgoingPayload,
   extractIncomingPayload,
+  isPendingMessageReceiptAttachment,
+  isPendingMessageServicePhoto,
   isAudioOnlyBatchWithoutTranscription,
   normalizePhone,
   receiptDecisionFromAnalysis,
@@ -356,6 +358,7 @@ async function getPendingInboundBatchState(args: {
       id: true,
       content: true,
       type: true,
+      metadata: true,
       createdAt: true,
     },
   });
@@ -483,6 +486,59 @@ export async function POST(request: Request) {
 
   try {
     const incoming = extractIncomingPayload(payload);
+    const outgoing = extractOutgoingPayload(payload);
+
+    if (outgoing) {
+      if (outgoing.messageId) {
+        const alreadySaved = await prisma.message.findFirst({
+          where: {
+            OR: [
+              { whatsappMessageId: outgoing.messageId },
+              { metadata: { path: ["key", "id"], equals: outgoing.messageId } },
+            ],
+          },
+          select: { id: true },
+        });
+
+        if (alreadySaved) {
+          return NextResponse.json({ ok: true, ignored: true, reason: "duplicate_outbound" });
+        }
+      }
+
+      const lead = await leadService.upsertByPhone(outgoing.phone, {
+        source: "whatsapp",
+      });
+      const conversation = await conversationService.getOrCreateOpenConversation(lead.id);
+
+      await conversationService.saveMessage({
+        conversationId: conversation.id,
+        leadId: lead.id,
+        direction: "OUTBOUND",
+        role: "HUMAN",
+        type: outgoing.type,
+        content: outgoing.text,
+        whatsappMessageId: outgoing.messageId,
+        metadata: outgoing.metadata,
+      });
+
+      await leadService.setAiState(lead.id, false).catch(() => {});
+
+      await prisma.log.create({
+        data: {
+          type: "WHATSAPP_MANUAL_MESSAGE_SYNCED",
+          message: `Mensagem manual sincronizada de ${outgoing.phone}`,
+          payload: {
+            leadId: lead.id,
+            conversationId: conversation.id,
+            phone: outgoing.phone,
+            mediaKind: outgoing.mediaKind,
+            messageId: outgoing.messageId,
+          },
+        },
+      }).catch(() => {});
+
+      return NextResponse.json({ ok: true, manualMessageSynced: true });
+    }
 
     if (!incoming) {
       return NextResponse.json({ ok: true, ignored: true, reason: "no_text" });
@@ -637,15 +693,22 @@ export async function POST(request: Request) {
             id: inboundMessage.id,
             content: incoming.text,
             type: incoming.type,
+            mediaKind: incoming.mediaKind,
+            metadata: incoming.metadata as Prisma.JsonValue,
             createdAt: inboundMessage.createdAt,
           } satisfies PendingInboundMessage];
-    const batchHasPhoto = batchedInboundMessages.some((message) => message.type === "IMAGE");
+    const batchHasReceiptAttachment = batchedInboundMessages.some((message) =>
+      isPendingMessageReceiptAttachment(message),
+    );
+    const batchHasPhoto = batchedInboundMessages.some((message) =>
+      isPendingMessageServicePhoto(message),
+    );
     const batchedIncomingText = buildAiIncomingTextFromBatch(
       batchedInboundMessages,
       hasRecentPixContext({
         incomingText: incoming.text,
         recentHistory,
-        hasPhoto: batchHasPhoto,
+        hasPhoto: batchHasReceiptAttachment,
       }),
     );
     const isWaitingReceipt = detectIfWaitingPaymentReceipt(lead.summary);
@@ -654,7 +717,7 @@ export async function POST(request: Request) {
     const hasRecentPixInHistory = hasRecentPixContext({
       incomingText: batchedIncomingText,
       recentHistory,
-      hasPhoto: batchHasPhoto,
+      hasPhoto: batchHasReceiptAttachment,
     });
 
     // Estado persistente: a foto pode ter chegado em rodadas anteriores e saído
@@ -682,14 +745,14 @@ export async function POST(request: Request) {
       askedForPix: detectPaymentIntent({
         incomingText: batchedIncomingText,
         recentHistory,
-        hasPhoto: batchHasPhoto,
+        hasPhoto: batchHasReceiptAttachment,
       }),
       pixAlreadySent: hasRecentPixInHistory,
       awaitingReceipt: isWaitingReceipt,
       isReceiptCandidate: detectPaymentReceipt({
         incomingText: batchedIncomingText,
         recentHistory,
-        hasPhoto: batchHasPhoto,
+        hasPhoto: batchHasReceiptAttachment,
       }),
       serviceType: detectServiceType({
         incomingText: batchedIncomingText,
@@ -698,7 +761,7 @@ export async function POST(request: Request) {
       }),
     };
 
-    if (isWaitingReceipt && batchHasPhoto && !hasRecentPixInHistory) {
+    if (isWaitingReceipt && batchHasReceiptAttachment && !hasRecentPixInHistory) {
       await prisma.log.create({
         data: {
           type: "PAYMENT_RECEIPT_SKIPPED",
@@ -803,8 +866,8 @@ export async function POST(request: Request) {
       (detectPaymentReceipt({
         incomingText: batchedIncomingText,
         recentHistory,
-        hasPhoto: batchHasPhoto,
-      }) || (isReceiptInvalid && batchHasPhoto))
+        hasPhoto: batchHasReceiptAttachment,
+      }) || (isReceiptInvalid && batchHasReceiptAttachment))
     ) {
       let receiptResult: {
         text: string;
@@ -813,7 +876,7 @@ export async function POST(request: Request) {
         decision: string;
       };
 
-      if (batchHasPhoto) {
+      if (batchHasReceiptAttachment) {
         receiptResult = await handleReceiptImageMessage({
           incoming,
           lead: {
@@ -850,7 +913,7 @@ export async function POST(request: Request) {
           message: "Lead informou pagamento por texto. Conferir pagamento manualmente.",
           analysis: null,
           stage: receiptResult.stage,
-          incomingType: batchHasPhoto ? "IMAGE" : incoming.type,
+          incomingType: batchHasReceiptAttachment ? "IMAGE" : incoming.type,
         });
       }
 
@@ -889,7 +952,11 @@ export async function POST(request: Request) {
       return NextResponse.json(payload);
     }
 
-    if (detectPaymentIntent({ incomingText: batchedIncomingText, recentHistory, hasPhoto: batchHasPhoto })) {
+    if (detectPaymentIntent({
+      incomingText: batchedIncomingText,
+      recentHistory,
+      hasPhoto: batchHasPhoto,
+    })) {
       const paymentMessages = sendPixAsSeparateMessage();
 
       emitAiDebug(

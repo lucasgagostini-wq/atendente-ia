@@ -4,7 +4,25 @@ export type ConversationStatus = "OPEN" | "ARCHIVED" | "CLOSED";
 export type MessageDirection = "INBOUND" | "OUTBOUND";
 export type MessageRole = "LEAD" | "ASSISTANT" | "HUMAN" | "SYSTEM";
 export type MessageType = "TEXT" | "IMAGE" | "AUDIO";
+export type MessageMediaKind = "TEXT" | "IMAGE" | "AUDIO" | "DOCUMENT" | "VIDEO" | "STICKER";
 export type ProspectingJobStatus = "QUEUED" | "RUNNING" | "COMPLETED" | "FAILED";
+
+export type MessageMediaMetadata = {
+  kind?: MessageMediaKind;
+  mimetype?: string | null;
+  fileName?: string | null;
+  sizeBytes?: number | null;
+  url?: string | null;
+  storagePath?: string | null;
+  uploadFailed?: boolean;
+  mediaDownloadError?: string | null;
+  hasMediaBase64?: boolean;
+  hasMediaUrl?: boolean;
+};
+
+export type MessageMetadata = Record<string, unknown> & {
+  media?: MessageMediaMetadata | null;
+};
 
 export type Lead = {
   id: string;
@@ -48,7 +66,7 @@ export type Message = {
   role: MessageRole;
   type: MessageType;
   content: string;
-  metadata?: Record<string, unknown> | null;
+  metadata?: MessageMetadata | null;
   createdAt: string;
 };
 

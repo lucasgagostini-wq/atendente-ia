@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import express from "express";
 import QRCode from "qrcode";
 import { Boom } from "@hapi/boom";
+import { createClient } from "@supabase/supabase-js";
 import makeWASocket, {
   Browsers,
   DisconnectReason,
@@ -46,12 +47,22 @@ let pairingReadyAt = 0;
 let pairingReadyWaiters = [];
 const typingSessions = new Map();
 const leadActivityVersions = new Map();
+const bridgeOriginatedMessageIds = new Map();
 const TYPING_BUFFER_MS = Number(process.env.TYPING_BUFFER_MS || 1000);
 const MIN_VISIBLE_TYPING_MS = Number(process.env.MIN_VISIBLE_TYPING_MS || 1500);
 const TEXT_INITIAL_TYPING_MIN_MS = Number(process.env.TEXT_INITIAL_TYPING_MIN_MS || 1500);
 const TEXT_INITIAL_TYPING_MAX_MS = Number(process.env.TEXT_INITIAL_TYPING_MAX_MS || 2500);
 const MEDIA_INITIAL_TYPING_MIN_MS = Number(process.env.MEDIA_INITIAL_TYPING_MIN_MS || 2000);
 const MEDIA_INITIAL_TYPING_MAX_MS = Number(process.env.MEDIA_INITIAL_TYPING_MAX_MS || 3500);
+const SUPABASE_MEDIA_BUCKET = process.env.SUPABASE_MEDIA_BUCKET || "whatsapp-media";
+const INLINE_MEDIA_LIMIT_BYTES = Number(process.env.WEBHOOK_INLINE_MEDIA_LIMIT_BYTES || 300000);
+const OUTBOUND_MESSAGE_MEMORY_MS = Number(process.env.BRIDGE_OUTBOUND_MEMORY_MS || 10 * 60 * 1000);
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+const supabaseServiceRole = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+const supabaseAdmin =
+  supabaseUrl && supabaseServiceRole
+    ? createClient(supabaseUrl, supabaseServiceRole)
+    : null;
 
 const app = express();
 app.use((_, res, next) => {
@@ -123,6 +134,21 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function rememberBridgeOriginatedMessage(messageId) {
+  if (!messageId) return;
+
+  const timeout = setTimeout(() => {
+    bridgeOriginatedMessageIds.delete(messageId);
+  }, OUTBOUND_MESSAGE_MEMORY_MS);
+  timeout.unref?.();
+
+  bridgeOriginatedMessageIds.set(messageId, timeout);
+}
+
+function isBridgeOriginatedMessage(messageId) {
+  return Boolean(messageId && bridgeOriginatedMessageIds.has(messageId));
+}
+
 function randomBetween(min, max) {
   return Math.round(min + Math.random() * (max - min));
 }
@@ -139,12 +165,18 @@ function isCurrentLeadActivity(phone, version) {
 }
 
 function getInitialTypingDelayMs(message) {
-  const hasImage = Boolean(message?.message?.imageMessage || message?.message?.documentMessage);
+  const hasImage = Boolean(
+    message?.message?.imageMessage ||
+    message?.message?.documentMessage ||
+    message?.message?.videoMessage ||
+    message?.message?.stickerMessage,
+  );
   const text =
     message?.message?.conversation ||
     message?.message?.extendedTextMessage?.text ||
     message?.message?.imageMessage?.caption ||
     message?.message?.documentMessage?.caption ||
+    message?.message?.videoMessage?.caption ||
     "";
 
   if (hasImage || String(text).trim().length > 80) {
@@ -291,12 +323,98 @@ async function emitWebhook(payload) {
   }
 }
 
-async function extractIncomingMedia(message) {
-  const imageMessage = message?.message?.imageMessage;
-  const documentMessage = message?.message?.documentMessage;
-  const mediaNode = imageMessage || documentMessage;
+function detectMediaKind(messageNode) {
+  if (messageNode?.imageMessage) return "IMAGE";
+  if (messageNode?.audioMessage) return "AUDIO";
+  if (messageNode?.documentMessage) return "DOCUMENT";
+  if (messageNode?.videoMessage) return "VIDEO";
+  if (messageNode?.stickerMessage) return "STICKER";
+  return "TEXT";
+}
 
-  if (!mediaNode) return null;
+function fileExtensionFromMime(mimetype = "", fallbackName = "", mediaKind = "TEXT") {
+  const known = {
+    "image/jpeg": "jpg",
+    "image/jpg": "jpg",
+    "image/png": "png",
+    "image/webp": "webp",
+    "audio/ogg": "ogg",
+    "audio/mpeg": "mp3",
+    "audio/mp4": "m4a",
+    "video/mp4": "mp4",
+    "application/pdf": "pdf",
+  };
+
+  if (fallbackName && /\.[a-z0-9]+$/i.test(fallbackName)) {
+    return fallbackName.split(".").pop().toLowerCase();
+  }
+
+  if (known[mimetype]) return known[mimetype];
+  if (/^image\//i.test(mimetype)) return "jpg";
+  if (/^audio\//i.test(mimetype)) return "ogg";
+  if (/^video\//i.test(mimetype)) return "mp4";
+  if (/pdf/i.test(mimetype)) return "pdf";
+  if (mediaKind === "STICKER") return "webp";
+  return "bin";
+}
+
+async function uploadMediaToSupabase({
+  buffer,
+  mimetype,
+  fileName,
+  phone,
+  messageId,
+  mediaKind,
+  direction,
+}) {
+  if (!supabaseAdmin) return null;
+
+  const extension = fileExtensionFromMime(mimetype, fileName, mediaKind);
+  const safeFileName =
+    fileName?.replace(/[^a-zA-Z0-9._-]+/g, "-") ||
+    `${messageId || Date.now()}.${extension}`;
+  const storagePath = [
+    "whatsapp",
+    instanceName,
+    direction,
+    phone || "unknown",
+    `${Date.now()}-${safeFileName}`,
+  ].join("/");
+
+  const { error } = await supabaseAdmin.storage
+    .from(SUPABASE_MEDIA_BUCKET)
+    .upload(storagePath, buffer, {
+      contentType: mimetype || "application/octet-stream",
+      upsert: false,
+    });
+
+  if (error) throw error;
+
+  const { data } = supabaseAdmin.storage
+    .from(SUPABASE_MEDIA_BUCKET)
+    .getPublicUrl(storagePath);
+
+  return {
+    url: data?.publicUrl || null,
+    storagePath,
+  };
+}
+
+async function extractMessageMedia(message, options = {}) {
+  const imageMessage = message?.message?.imageMessage;
+  const audioMessage = message?.message?.audioMessage;
+  const documentMessage = message?.message?.documentMessage;
+  const videoMessage = message?.message?.videoMessage;
+  const stickerMessage = message?.message?.stickerMessage;
+  const mediaNode =
+    imageMessage ||
+    audioMessage ||
+    documentMessage ||
+    videoMessage ||
+    stickerMessage;
+  const mediaKind = detectMediaKind(message?.message);
+
+  if (!mediaNode || mediaKind === "TEXT") return null;
 
   try {
     const buffer = await downloadMediaMessage(
@@ -305,17 +423,52 @@ async function extractIncomingMedia(message) {
       {},
       { logger: undefined, reuploadRequest: socket?.updateMediaMessage },
     );
-    const mimetype = mediaNode.mimetype || (imageMessage ? "image/jpeg" : "application/octet-stream");
-    const base64 = Buffer.from(buffer).toString("base64");
+    const mimetype =
+      mediaNode.mimetype ||
+      (imageMessage
+        ? "image/jpeg"
+        : audioMessage
+          ? "audio/ogg"
+          : videoMessage
+            ? "video/mp4"
+            : "application/octet-stream");
+    const fileName = documentMessage?.fileName || null;
+    let upload = null;
+
+    try {
+      upload = await uploadMediaToSupabase({
+        buffer,
+        mimetype,
+        fileName,
+        phone: options.phone || "",
+        messageId: message?.key?.id || null,
+        mediaKind,
+        direction: options.direction || "inbound",
+      });
+    } catch (error) {
+      console.error("[baileys-bridge] failed to upload media to Supabase:", error);
+    }
+
+    const canInline =
+      (mediaKind === "IMAGE" || mediaKind === "DOCUMENT") &&
+      buffer.length <= INLINE_MEDIA_LIMIT_BYTES;
+    const base64 = canInline ? Buffer.from(buffer).toString("base64") : null;
 
     return {
+      kind: mediaKind,
       mimetype,
-      fileName: documentMessage?.fileName || null,
-      mediaBase64: `data:${mimetype};base64,${base64}`,
+      fileName,
+      sizeBytes: buffer.length,
+      url: upload?.url || null,
+      storagePath: upload?.storagePath || null,
+      uploadedToStorage: Boolean(upload?.url),
+      uploadFailed: !upload?.url && Boolean(supabaseAdmin),
+      mediaBase64: base64 ? `data:${mimetype};base64,${base64}` : undefined,
     };
   } catch (error) {
-    console.error("[baileys-bridge] failed to download incoming media:", error);
+    console.error("[baileys-bridge] failed to download media:", error);
     return {
+      kind: mediaKind,
       mimetype: mediaNode.mimetype || null,
       fileName: documentMessage?.fileName || null,
       mediaDownloadError: error instanceof Error ? error.message : "download failed",
@@ -399,10 +552,41 @@ async function startSocket(options = {}) {
       if (type !== "notify") return;
 
       for (const message of messages) {
-        if (!message?.message || message.key?.fromMe) continue;
+        if (!message?.message) continue;
         if (!message.key?.remoteJid || message.key.remoteJid.endsWith("@g.us")) continue;
 
         const phone = resolvePhoneFromJid(message.key.remoteJid);
+        if (!phone) continue;
+
+        if (message.key?.fromMe) {
+          if (isBridgeOriginatedMessage(message.key?.id)) {
+            continue;
+          }
+
+          const media = await extractMessageMedia(message, {
+            phone,
+            direction: "outbound",
+          });
+
+          await emitWebhook({
+            event: "MESSAGES_UPSERT",
+            data: {
+              phone,
+              replyTransport: "baileys_bridge",
+              key: {
+                remoteJid: message.key.remoteJid,
+                id: message.key.id || null,
+                fromMe: true,
+              },
+              message: message.message,
+              media,
+              messageTimestamp: message.messageTimestamp || null,
+              pushName: message.pushName || null,
+            },
+          });
+          continue;
+        }
+
         const bridgeStartedAt = Date.now();
         const activityVersion = nextLeadActivityVersion(phone);
         const initialTypingDelayMs = getInitialTypingDelayMs(message);
@@ -428,7 +612,10 @@ async function startSocket(options = {}) {
         })();
 
         try {
-          const media = await extractIncomingMedia(message);
+          const media = await extractMessageMedia(message, {
+            phone,
+            direction: "inbound",
+          });
 
           const webhookResponse = await emitWebhook({
             event: "MESSAGES_UPSERT",
@@ -508,7 +695,8 @@ async function startSocket(options = {}) {
                 await sleep(betweenMessagesTypingMs);
               }
 
-              await sock.sendMessage(toJid(replyPhone), { text: replyText });
+              const result = await sock.sendMessage(toJid(replyPhone), { text: replyText });
+              rememberBridgeOriginatedMessage(result?.key?.id || null);
               clearTypingSession(replyPhone, { pause: true });
               console.log(`[typing] mensagem ${index + 1}/${replies.length} enviada para ${replyPhone} (${replyText.length} chars)`);
             }
@@ -736,6 +924,7 @@ app.post("/message/sendText/:instance", async (req, res) => {
   try {
     const jid = toJid(number);
     const result = await socket.sendMessage(jid, { text });
+    rememberBridgeOriginatedMessage(result?.key?.id || null);
 
     res.json({
       key: result?.key ?? null,

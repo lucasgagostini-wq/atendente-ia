@@ -32,6 +32,12 @@ export async function POST(request: Request) {
       role: "HUMAN",
       type: "TEXT",
       content: parsed.data.text,
+      whatsappMessageId:
+        typeof sent?.key?.id === "string"
+          ? sent.key.id
+          : typeof sent?.serverId === "string"
+            ? sent.serverId
+            : null,
       metadata: sent,
     });
 
