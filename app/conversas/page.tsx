@@ -13,7 +13,7 @@ import {
   ZapOff,
   Phone,
 } from "lucide-react";
-import { formatDistanceToNow, format, isToday, isYesterday, differenceInMinutes } from "date-fns";
+import { formatDistance, format, isToday, isYesterday, differenceInMinutes } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { toast } from "sonner";
 import {
@@ -27,7 +27,7 @@ import { useAppStore } from "@/store/app-store";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Message } from "@/types";
+import { Conversation, Message } from "@/types";
 
 // ─── Helpers ──────────────────────────────────────────────
 
@@ -65,6 +65,23 @@ function isGrouped(current: Message, previous: Message | undefined) {
   );
 }
 
+function getLatestMessage(messages: Message[] | undefined) {
+  if (!messages?.length) return undefined;
+
+  return messages.reduce((latest, message) => (
+    new Date(message.createdAt).getTime() > new Date(latest.createdAt).getTime()
+      ? message
+      : latest
+  ));
+}
+
+function formatRelativeConversationTime(dateStr: string, now: number) {
+  return formatDistance(new Date(dateStr), new Date(now), {
+    locale: ptBR,
+    addSuffix: true,
+  });
+}
+
 function Initials({ name }: { name: string }) {
   return (
     <div className="grid size-7 shrink-0 place-items-center rounded-full bg-zinc-800 text-xs font-semibold text-zinc-400 ring-1 ring-zinc-700/50">
@@ -94,10 +111,15 @@ export default function ConversasPage() {
   const [stageFilter, setStageFilter] = useState<string>("ALL");
   const [manualMessage, setManualMessage] = useState("");
   const [sending, setSending] = useState(false);
+  const [relativeNow, setRelativeNow] = useState(() => Date.now());
+  const [seenLatestMessageByConversation, setSeenLatestMessageByConversation] = useState<
+    Record<string, string | null>
+  >({});
 
   const updateConversation = useUpdateConversation();
   const updateLead = useUpdateLead();
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const initializedSeenStateRef = useRef(false);
 
   const filteredConversations = useMemo(() => {
     return conversations.filter((c) => {
@@ -115,13 +137,46 @@ export default function ConversasPage() {
     }
   }, [filteredConversations, selectedConversationId, setSelectedConversationId]);
 
-  const { data: selected, refetch } = useConversation(selectedConversationId ?? undefined);
+  const { data: selectedData, refetch } = useConversation(selectedConversationId ?? undefined);
+  const selected = selectedData as Conversation | undefined;
   const lead = selected?.lead;
   const messages = selected?.messages ?? [];
+  const selectedLatestMessage = getLatestMessage(messages);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      setRelativeNow(Date.now());
+    }, 60_000);
+
+    return () => window.clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages.length]);
+
+  useEffect(() => {
+    if (initializedSeenStateRef.current || conversations.length === 0) return;
+
+    initializedSeenStateRef.current = true;
+    setSeenLatestMessageByConversation(
+      Object.fromEntries(
+        conversations.map((conversation) => [conversation.id, getLatestMessage(conversation.messages)?.id ?? null]),
+      ),
+    );
+  }, [conversations]);
+
+  useEffect(() => {
+    if (!selectedConversationId || !selectedLatestMessage?.id) return;
+
+    setSeenLatestMessageByConversation((current) => {
+      if (current[selectedConversationId] === selectedLatestMessage.id) return current;
+      return {
+        ...current,
+        [selectedConversationId]: selectedLatestMessage.id,
+      };
+    });
+  }, [selectedConversationId, selectedLatestMessage?.id]);
 
   async function sendManualMessage(e: FormEvent) {
     e.preventDefault();
@@ -238,15 +293,27 @@ export default function ConversasPage() {
 
           {filteredConversations.map((conv) => {
             const active = conv.id === selectedConversationId;
-            const latest = conv.messages?.[0];
+            const latest = getLatestMessage(conv.messages);
             const name = conv.lead?.name || "Lead sem nome";
             const stage = conv.lead?.funnelStage ?? "COLD";
             const isOpen = conv.status === "OPEN";
+            const isUnread = Boolean(
+              latest &&
+                latest.direction === "INBOUND" &&
+                !active &&
+                seenLatestMessageByConversation[conv.id] !== latest.id,
+            );
 
             return (
               <button
                 key={conv.id}
-                onClick={() => setSelectedConversationId(conv.id)}
+                onClick={() => {
+                  setSelectedConversationId(conv.id);
+                  setSeenLatestMessageByConversation((current) => ({
+                    ...current,
+                    [conv.id]: latest?.id ?? null,
+                  }));
+                }}
                 aria-current={active ? "true" : undefined}
                 aria-label={`${name} — ${stageLabelMap[stage]}${isOpen ? " — aberta" : ""}${latest ? ` — ${latest.content.slice(0, 60)}` : ""}`}
                 className={`group relative w-full border-b border-zinc-800/40 px-3 py-3 text-left transition-colors last:border-0 ${
@@ -265,12 +332,20 @@ export default function ConversasPage() {
 
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-1">
-                      <p className={`truncate text-sm font-medium ${active ? "text-indigo-300" : "text-zinc-200"}`}>
-                        {name}
-                      </p>
+                      <div className="flex min-w-0 items-center gap-2">
+                        {isUnread && (
+                          <span
+                            aria-label="Conversa com mensagem não lida"
+                            className="size-2 shrink-0 rounded-full bg-sky-400 ring-2 ring-sky-400/20"
+                          />
+                        )}
+                        <p className={`truncate text-sm font-medium ${active ? "text-indigo-300" : "text-zinc-200"}`}>
+                          {name}
+                        </p>
+                      </div>
                       {latest?.createdAt && (
                         <span className="shrink-0 text-[10px] text-zinc-600">
-                          {formatDistanceToNow(new Date(latest.createdAt), { locale: ptBR, addSuffix: false })}
+                          {formatRelativeConversationTime(latest.createdAt, relativeNow)}
                         </span>
                       )}
                     </div>
@@ -285,7 +360,7 @@ export default function ConversasPage() {
                     </div>
 
                     {latest && (
-                      <p className="mt-1 truncate text-xs text-zinc-500">
+                      <p className={`mt-1 truncate text-xs ${isUnread ? "text-zinc-300" : "text-zinc-500"}`}>
                         {latest.direction === "OUTBOUND" && (
                           <span className="text-zinc-600">Você: </span>
                         )}
