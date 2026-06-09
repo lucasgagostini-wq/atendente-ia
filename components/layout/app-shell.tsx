@@ -11,7 +11,8 @@ import {
 } from "@phosphor-icons/react";
 import { AdminCommandPalette } from "@/components/admin-console/admin-command-palette";
 import { ProfileSwitcher } from "@/components/layout/profile-switcher";
-import { buildProfileHref, getClientProfileSlug } from "@/lib/profile-utils";
+import { useActiveProfileSlug } from "@/hooks/use-active-profile-slug";
+import { buildProfileHref } from "@/lib/profile-utils";
 import { cn } from "@/lib/utils";
 import { buildBreadcrumbItems, getPageContext, navGroups } from "@/lib/navigation";
 
@@ -25,7 +26,7 @@ export function AppShell({ children }: Props) {
   const breadcrumbItems = buildBreadcrumbItems(pathname);
   const siblingItems = pageContext.group?.items ?? [];
   const showBack = !isPublicPage && pathname !== "/dashboard";
-  const activeProfileSlug = getClientProfileSlug();
+  const activeProfileSlug = useActiveProfileSlug();
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });

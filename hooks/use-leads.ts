@@ -1,8 +1,8 @@
 "use client";
 
 import { apiRequest as request } from "@/lib/api-client";
-import { getClientProfileSlug } from "@/lib/profile-utils";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useActiveProfileSlug } from "@/hooks/use-active-profile-slug";
 import { Lead } from "@/types";
 
 type LeadsFilters = {
@@ -29,7 +29,7 @@ function buildLeadsQuery(filters: LeadsFilters = {}) {
 }
 
 export function useLeads(filters: LeadsFilters = {}, options?: { enabled?: boolean }) {
-  const activeSlug = getClientProfileSlug();
+  const activeSlug = useActiveProfileSlug();
 
   return useQuery({
     queryKey: ["leads", activeSlug, filters],
@@ -39,7 +39,7 @@ export function useLeads(filters: LeadsFilters = {}, options?: { enabled?: boole
 }
 
 export function useLead(id?: string) {
-  const activeSlug = getClientProfileSlug();
+  const activeSlug = useActiveProfileSlug();
 
   return useQuery({
     queryKey: ["lead", activeSlug, id],
@@ -50,7 +50,7 @@ export function useLead(id?: string) {
 
 export function useUpdateLead() {
   const queryClient = useQueryClient();
-  const activeSlug = getClientProfileSlug();
+  const activeSlug = useActiveProfileSlug();
 
   return useMutation({
     mutationFn: (args: { id: string; body: Record<string, unknown> }) =>

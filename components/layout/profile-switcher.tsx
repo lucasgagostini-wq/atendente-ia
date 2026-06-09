@@ -4,8 +4,9 @@ import { useEffect, useMemo, useRef } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { Stack, Storefront } from "@phosphor-icons/react";
-import { ACTIVE_PROFILE_COOKIE, getClientProfileSlug } from "@/lib/profile-utils";
+import { ACTIVE_PROFILE_COOKIE } from "@/lib/profile-utils";
 import { useProfiles } from "@/hooks/use-profiles";
+import { useActiveProfileSlug } from "@/hooks/use-active-profile-slug";
 import { Select } from "@/components/ui/select";
 import { useAppStore } from "@/store/app-store";
 
@@ -20,7 +21,7 @@ export function ProfileSwitcher() {
   const { data, isLoading } = useProfiles();
   const lastAppliedSlugRef = useRef<string | null>(null);
 
-  const activeSlug = getClientProfileSlug() ?? data?.activeSlug ?? "restauracao-fotos";
+  const activeSlug = useActiveProfileSlug() ?? data?.activeSlug ?? "restauracao-fotos";
   const profileOptions = useMemo(
     () =>
       (data?.profiles ?? []).map((profile) => ({

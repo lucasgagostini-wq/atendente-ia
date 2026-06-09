@@ -1,14 +1,14 @@
 "use client";
 
 import { apiRequest as request } from "@/lib/api-client";
-import { getClientProfileSlug } from "@/lib/profile-utils";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useActiveProfileSlug } from "@/hooks/use-active-profile-slug";
 import { Settings } from "@/types";
 
 
 
 export function useSettings() {
-  const activeSlug = getClientProfileSlug();
+  const activeSlug = useActiveProfileSlug();
 
   return useQuery({
     queryKey: ["settings", activeSlug],
@@ -18,7 +18,7 @@ export function useSettings() {
 
 export function useUpdateSettings() {
   const queryClient = useQueryClient();
-  const activeSlug = getClientProfileSlug();
+  const activeSlug = useActiveProfileSlug();
 
   return useMutation({
     mutationFn: (body: Partial<Settings>) =>

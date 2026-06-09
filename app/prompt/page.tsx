@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Save } from "lucide-react";
 import { toast } from "sonner";
-import { getClientProfileSlug } from "@/lib/profile-utils";
+import { useActiveProfileSlug } from "@/hooks/use-active-profile-slug";
 import { Prompt } from "@/types";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,7 +26,7 @@ async function request<T>(input: RequestInfo | URL, init?: RequestInit): Promise
 
 export default function PromptPage() {
   const queryClient = useQueryClient();
-  const activeSlug = getClientProfileSlug();
+  const activeSlug = useActiveProfileSlug();
   const [form, setForm] = useState<Partial<Prompt>>({});
 
   const promptQuery = useQuery({

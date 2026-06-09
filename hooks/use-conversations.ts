@@ -2,8 +2,8 @@
 
 import { apiRequest as request } from "@/lib/api-client";
 import { useEffect } from "react";
-import { getClientProfileSlug } from "@/lib/profile-utils";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useActiveProfileSlug } from "@/hooks/use-active-profile-slug";
 import { Conversation } from "@/types";
 
 const CONVERSATIONS_POLL_INTERVAL_MS = 5_000;
@@ -44,7 +44,7 @@ function mergeConversationIntoList(
 
 
 export function useConversations() {
-  const activeSlug = getClientProfileSlug();
+  const activeSlug = useActiveProfileSlug();
 
   return useQuery<Conversation[]>({
     queryKey: ["conversations", activeSlug],
@@ -58,7 +58,7 @@ export function useConversations() {
 
 export function useConversation(id?: string) {
   const queryClient = useQueryClient();
-  const activeSlug = getClientProfileSlug();
+  const activeSlug = useActiveProfileSlug();
 
   const query = useQuery<Conversation>({
     queryKey: ["conversation", activeSlug, id],
@@ -84,7 +84,7 @@ export function useConversation(id?: string) {
 
 export function useCreateConversation() {
   const queryClient = useQueryClient();
-  const activeSlug = getClientProfileSlug();
+  const activeSlug = useActiveProfileSlug();
 
   return useMutation({
     mutationFn: (body: { leadId: string }) =>
@@ -100,7 +100,7 @@ export function useCreateConversation() {
 
 export function useUpdateConversation() {
   const queryClient = useQueryClient();
-  const activeSlug = getClientProfileSlug();
+  const activeSlug = useActiveProfileSlug();
 
   return useMutation({
     mutationFn: (args: { id: string; body: Record<string, unknown> }) =>

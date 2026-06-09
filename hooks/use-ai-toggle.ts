@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { getClientProfileSlug } from "@/lib/profile-utils";
+import { useActiveProfileSlug } from "@/hooks/use-active-profile-slug";
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -15,7 +15,7 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 
 /** Estado atual da pausa global da IA */
 export function useAiPausedState() {
-  const activeSlug = getClientProfileSlug();
+  const activeSlug = useActiveProfileSlug();
 
   return useQuery({
     queryKey: ["ai-paused", activeSlug],
@@ -27,7 +27,7 @@ export function useAiPausedState() {
 /** Alterna pausa/ativa da IA globalmente */
 export function useToggleAiPause() {
   const queryClient = useQueryClient();
-  const activeSlug = getClientProfileSlug();
+  const activeSlug = useActiveProfileSlug();
 
   return useMutation({
     mutationFn: () =>

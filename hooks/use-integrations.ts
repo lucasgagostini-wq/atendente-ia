@@ -1,8 +1,8 @@
 "use client";
 
 import { apiRequest as request } from "@/lib/api-client";
-import { getClientProfileSlug } from "@/lib/profile-utils";
 import { useQuery } from "@tanstack/react-query";
+import { useActiveProfileSlug } from "@/hooks/use-active-profile-slug";
 
 type IntegrationStatus = {
   checks: {
@@ -119,7 +119,7 @@ async function getMergedIntegrationStatus() {
 }
 
 export function useIntegrationsStatus() {
-  const activeSlug = getClientProfileSlug();
+  const activeSlug = useActiveProfileSlug();
 
   return useQuery({
     queryKey: ["integrations-status", activeSlug],

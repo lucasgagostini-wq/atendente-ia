@@ -2,8 +2,8 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest as request } from "@/lib/api-client";
-import { getClientProfileSlug } from "@/lib/profile-utils";
 import { Profile } from "@/types";
+import { useActiveProfileSlug } from "@/hooks/use-active-profile-slug";
 
 type ProfilesResponse = {
   profiles: Profile[];
@@ -12,7 +12,7 @@ type ProfilesResponse = {
 };
 
 export function useProfiles() {
-  const activeSlug = getClientProfileSlug();
+  const activeSlug = useActiveProfileSlug();
 
   return useQuery({
     queryKey: ["profiles", activeSlug],
