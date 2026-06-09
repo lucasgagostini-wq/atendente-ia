@@ -34,32 +34,56 @@ const BACKBONE = [
   "So use linguagem de memoria/avo/lembranca se o cliente trouxer esse contexto.",
 ].join("\n");
 
+// Espelha a cadeia de fallback da produção (services/openrouter.service.ts):
+// o modelo primário pode ser pago e retornar 402 sem créditos; aí caímos nos
+// modelos gratuitos, que é o que a Vercel realmente serve nesse caso.
+const FREE_FALLBACK_MODELS = [
+  "openai/gpt-oss-20b:free",
+  "z-ai/glm-4.5-air:free",
+  "nvidia/nemotron-3-nano-30b-a3b:free",
+];
+
+function modelsToTry() {
+  const primary = process.env.OPENROUTER_DEFAULT_MODEL || "deepseek/deepseek-chat";
+  return Array.from(new Set([primary, ...FREE_FALLBACK_MODELS]));
+}
+
 async function callModel(systemPrompt: string, userText: string) {
   const apiKey = process.env.OPENROUTER_API_KEY;
-  const model = process.env.OPENROUTER_DEFAULT_MODEL || "deepseek/deepseek-chat";
+  const errors: string[] = [];
 
-  const { data } = await axios.post(
-    "https://openrouter.ai/api/v1/chat/completions",
-    {
-      model,
-      temperature: 0.6,
-      max_tokens: 220,
-      messages: [
-        { role: "system", content: systemPrompt },
-        { role: "user", content: userText },
-      ],
-    },
-    {
-      timeout: 30_000,
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-        "X-Title": "Atendente IA — eval-live",
-      },
-    },
-  );
+  for (const model of modelsToTry()) {
+    try {
+      const { data } = await axios.post(
+        "https://openrouter.ai/api/v1/chat/completions",
+        {
+          model,
+          temperature: 0.6,
+          max_tokens: 220,
+          messages: [
+            { role: "system", content: systemPrompt },
+            { role: "user", content: userText },
+          ],
+        },
+        {
+          timeout: 30_000,
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            "Content-Type": "application/json",
+            "X-Title": "Atendente IA — eval-live",
+          },
+        },
+      );
 
-  return data?.choices?.[0]?.message?.content?.trim() ?? "";
+      const content = data?.choices?.[0]?.message?.content?.trim() ?? "";
+      if (content) return { content, model };
+    } catch (error) {
+      const status = axios.isAxiosError(error) ? error.response?.status : null;
+      errors.push(`${model}: ${status ?? (error instanceof Error ? error.message : "erro")}`);
+    }
+  }
+
+  throw new Error(`nenhum modelo respondeu — ${errors.join(" | ")}`);
 }
 
 async function main() {
@@ -71,6 +95,8 @@ async function main() {
 
   const aiFixtures = fixtures.filter((fixture) => fixture.expect.route === "ai_response");
   let violations = 0;
+  let evaluated = 0;
+  let modelUsed = "";
 
   console.log(`\n▶ Eval com IA real — ${aiFixtures.length} cenários de resposta livre\n`);
 
@@ -96,7 +122,10 @@ async function main() {
 
     let raw = "";
     try {
-      raw = await callModel(BACKBONE, userText);
+      const result = await callModel(BACKBONE, userText);
+      raw = result.content;
+      modelUsed = result.model;
+      evaluated += 1;
     } catch (error) {
       console.error(`  ⚠️  ${fixture.id}: falha na chamada do modelo — ${error instanceof Error ? error.message : error}`);
       continue;
@@ -125,6 +154,14 @@ async function main() {
   }
 
   console.log(`\n${"─".repeat(60)}`);
+
+  if (evaluated === 0) {
+    console.log("⚠️  Nenhum cenário foi avaliado — todos os modelos falharam (ex.: 402 sem créditos).");
+    console.log("   Isso NÃO é um passe. Verifique créditos/modelo no OpenRouter e rode de novo.");
+    process.exit(1);
+  }
+
+  console.log(`Modelo usado: ${modelUsed} | cenários avaliados: ${evaluated}/${aiFixtures.length}`);
   if (violations === 0) {
     console.log("✅ Modelo real passou pelos guardrails sem violações de regra dura.");
   } else {

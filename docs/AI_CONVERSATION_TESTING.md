@@ -74,16 +74,46 @@ Arquivos:
 ## 4. Eval com IA real (opcional)
 
 ```bash
+# Usando a chave do .env (tsx não carrega .env sozinho — passe --env-file):
+npx tsx --env-file=.env tests/ai-conversations/eval-live.ts
+# ou, com a chave no ambiente:
 OPENROUTER_API_KEY=sk-or-... npm run eval:ai-live
 ```
 
-Chama o modelo de verdade para os cenários de resposta livre, aplica os
-guardrails e verifica se **a saída final ainda viola alguma regra dura**. Útil
-para responder "o modelo gratuito está bom o suficiente?".
+Chama o modelo de verdade para os cenários de resposta livre (os 5 que passam
+pela rota `ai_response`), aplica os guardrails e verifica se **a saída final
+ainda viola alguma regra dura**. Útil para responder "o modelo gratuito está bom
+o suficiente?".
 
-- Sem `OPENROUTER_API_KEY`, ele explica e sai com código 0 (nunca quebra o CI).
+Detalhes importantes:
+
+- **Cadeia de modelos = produção.** O primário (`OPENROUTER_DEFAULT_MODEL`,
+  hoje `deepseek/deepseek-chat`) é **pago**: sem créditos retorna **HTTP 402**.
+  O eval então cai nos modelos gratuitos (`openai/gpt-oss-20b:free`, …), igual ao
+  `services/openrouter.service.ts`. O log mostra `Modelo usado: ...`.
+- Os cenários **Sim→Pix** e **imagem→comprovante** NÃO entram aqui: são
+  determinísticos (não passam pelo modelo) e já são cobertos por
+  `test:ai-conversations`.
+- Sem `OPENROUTER_API_KEY`, ele explica e sai com código 0 (não quebra o CI).
+- Se **todos** os modelos falharem (ex.: 402 sem fallback), ele NÃO reporta passe
+  — sai com código 1 deixando claro que nada foi avaliado.
 - Não toca no banco (usa um backbone de prompt embutido).
-- Falha (código 1) se o modelo gerar algo proibido que o guardrail não conteve.
+
+### Teste real no WhatsApp ANTES do deploy
+
+O bridge local aponta o webhook para a **Vercel de produção**. Se o fix ainda
+não está em produção, um teste no WhatsApp seria processado pelo código **antigo**.
+Para validar a correção no fluxo real **antes** de deployar:
+
+1. Pare o bridge de produção (o que aponta pra Vercel).
+2. Rode `npm run start:local` — sobe o Next em `localhost:3000` + bridge apontando
+   pro webhook local (`scripts/bridge-local.mjs`). Agora o WhatsApp é processado
+   pelo código **com o fix**.
+3. Faça o roteiro manual (foto → edição → "?" → "Sim" → imagem como comprovante).
+4. Para voltar ao normal (bridge → produção), use `npm run bridge`.
+
+> Reset do lead de teste (`5519998266669`): **não há** `npm run reset-lead`. Use
+> o Admin Command Palette no app: **Ctrl+K → "Resetar número admin"**.
 
 ---
 

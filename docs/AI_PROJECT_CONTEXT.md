@@ -295,6 +295,8 @@ Antes de tráfego real, rodar a sequência:
 | Automações não executam | UI só salva regras, não dispara | Backlog |
 | Segredo de sessão (`lib/session.ts`) | **Corrigido** — não usa mais o "dev-secret" público em prod (deriva do DATABASE_URL). **Falta** definir `ADMIN_SESSION_SECRET` no painel da Vercel para um valor dedicado | ⚠️ Ação pendente na Vercel |
 | Webhook `/api/webhooks/evolution` sem assinatura | Endpoint público aceita qualquer POST (pode injetar mensagem / gastar crédito de IA) | Recomendado — exige mudança coordenada bridge+webhook |
+| Modelo primário pago sem créditos | `OPENROUTER_DEFAULT_MODEL=deepseek/deepseek-chat` retorna **HTTP 402**; produção cai no fallback gratuito (`openai/gpt-oss-20b:free`…). O `eval:ai-live` confirmou que o modelo free passa pelos guardrails | Funcional via fallback — repor créditos só se quiser o deepseek |
+| Fix de conversas (`e8c2a28`) não está em produção | Está na branch local `melhorias/roadmap`, **não publicada** no remoto; `origin/main` (Vercel) está em `12d0350`. Deploy exige merge → `main` (ação humana) | ⚠️ Pendente de deploy |
 
 ---
 
