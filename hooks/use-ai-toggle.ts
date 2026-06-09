@@ -19,7 +19,10 @@ export function useAiPausedState() {
 
   return useQuery({
     queryKey: ["ai-paused", activeSlug],
-    queryFn: () => request<{ aiPaused: boolean }>("/api/settings/ai-toggle"),
+    queryFn: () =>
+      request<{ aiPaused: boolean }>(
+        `/api/settings/ai-toggle?profile=${encodeURIComponent(activeSlug)}`,
+      ),
     refetchInterval: 10_000,
   });
 }
@@ -31,7 +34,10 @@ export function useToggleAiPause() {
 
   return useMutation({
     mutationFn: () =>
-      request<{ aiPaused: boolean }>("/api/settings/ai-toggle", { method: "POST" }),
+      request<{ aiPaused: boolean }>(
+        `/api/settings/ai-toggle?profile=${encodeURIComponent(activeSlug)}`,
+        { method: "POST" },
+      ),
     onSuccess: (data) => {
       queryClient.setQueryData(["ai-paused", activeSlug], data);
       queryClient.invalidateQueries({ queryKey: ["integrations-status"] });
