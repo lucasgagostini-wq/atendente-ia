@@ -27,6 +27,7 @@ import {
 } from "@/hooks/use-conversations";
 import { useUpdateLead } from "@/hooks/use-leads";
 import { formatPhone } from "@/lib/utils";
+import { formatRelativeConversationTime } from "@/lib/relative-time";
 import { useAppStore } from "@/store/app-store";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -84,25 +85,7 @@ function getLatestMessage(messages: Message[] | undefined) {
   ));
 }
 
-/**
- * Formata tempo relativo compacto para a lista de conversas.
- * Regras: agora (< 60s) → "agora"; < 60 min → "Xm"; < 24h → "Xh";
- * < 7d → "Xd"; senão → "dd/MM".
- * Usa `now` como âncora (atualiza a cada 30s) para evitar mostrar "1 min"
- * em mensagens recém-chegadas.
- */
-function formatRelativeConversationTime(dateStr: string, now: number): string {
-  const diffMs = now - new Date(dateStr).getTime();
-  if (diffMs < 0) return "agora";            // clock skew
-  if (diffMs < 60_000) return "agora";        // < 1 min
-  const diffMin = Math.floor(diffMs / 60_000);
-  if (diffMin < 60) return `${diffMin} min`;
-  const diffH = Math.floor(diffMin / 60);
-  if (diffH < 24) return `${diffH} h`;
-  const diffD = Math.floor(diffH / 24);
-  if (diffD < 7) return `${diffD} d`;
-  return format(new Date(dateStr), "dd/MM");
-}
+// formatRelativeConversationTime importado de @/lib/relative-time
 
 function getMessageMedia(message: Message): MessageMediaMetadata | null {
   const metadata = message.metadata as { media?: MessageMediaMetadata | null } | null | undefined;

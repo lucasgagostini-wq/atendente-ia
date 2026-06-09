@@ -9,6 +9,7 @@ import {
   PIX_KEY,
   PIX_NAME,
   SERVICE_IMAGE_SUMMARY_MARKER,
+  buildConfusionExplanationResponse,
   buildExpectedPaymentData,
   buildInvalidReceiptResponse,
   buildPostReceiptResponse,
@@ -24,9 +25,11 @@ import {
   ensureSalesCTA,
   hasRecentPixContext,
   isAffirmativeConfirmation,
+  isConfusionSignal,
   lastAssistantOfferedPix,
   markServiceImageReceived,
   normalizeCommercialResponse,
+  photoAlreadyAskedRecently,
   safeFallbackForStage,
   sanitizeAIResponse,
   sendPixAsSeparateMessage,
@@ -36,6 +39,7 @@ import {
   validatePromptMaster,
 } from "../services/ai-safety.service";
 import { buildAiDebugSnapshot, maskPhone, redactText } from "../lib/ai-debug";
+import { formatRelativeConversationTime } from "../lib/relative-time";
 
 const baseContext = {
   incomingText: "oi, tenho uma foto antiga para restaurar",
@@ -659,5 +663,118 @@ const snapshot = buildAiDebugSnapshot({
 assert.equal(snapshot.phoneMasked, "55*********44");
 assert.doesNotMatch(snapshot.leadIdMasked, /456789/);
 assert.equal(snapshot.flags.serviceType, "simple_edit");
+
+// ─────────────────────────────────────────────────────────────────
+// Confusão: isConfusionSignal + photoAlreadyAskedRecently
+// ─────────────────────────────────────────────────────────────────
+
+// sinais de confusão clássicos
+assert.equal(isConfusionSignal("não entendi"), true, "não entendi → confusão");
+assert.equal(isConfusionSignal("como assim?"), true, "como assim → confusão");
+assert.equal(isConfusionSignal("?"), true, "? → confusão");
+assert.equal(isConfusionSignal("??"), true, "?? → confusão");
+assert.equal(isConfusionSignal("explica"), true, "explica → confusão");
+assert.equal(isConfusionSignal("como funciona"), true, "como funciona → confusão");
+assert.equal(isConfusionSignal("não sei"), true, "não sei → confusão");
+// mensagens normais não são confusão
+assert.equal(isConfusionSignal("oi"), false, "oi → não é confusão");
+assert.equal(isConfusionSignal("quero restaurar"), false, "quero restaurar → não é confusão");
+assert.equal(isConfusionSignal("Sim"), false, "Sim → não é confusão");
+assert.equal(isConfusionSignal("Quanto custa?"), false, "Quanto custa? → não é confusão");
+
+// photoAlreadyAskedRecently: true se a IA pediu foto nas últimas falas
+assert.equal(
+  photoAlreadyAskedRecently([
+    "Atendente: Me manda a foto aqui que eu vejo pra você.",
+  ]),
+  true,
+  "última fala do atendente pediu foto → true",
+);
+assert.equal(
+  photoAlreadyAskedRecently([
+    "Atendente: Pra fazer essa, fica R$10. Quer que eu te mande o Pix?",
+  ]),
+  false,
+  "última fala do atendente não pediu foto → false",
+);
+assert.equal(photoAlreadyAskedRecently([]), false, "sem histórico → false");
+
+// buildConfusionExplanationResponse não menciona "me manda a foto" como primeiro CTA
+const confusionResp = buildConfusionExplanationResponse();
+assert.match(confusionResp, /funciona|processo|foto/i, "explica o processo");
+assert.match(confusionResp, /r\$\s*10/i, "menciona R$10");
+assert.match(confusionResp, /24h/i, "menciona prazo 24h");
+assert.doesNotMatch(confusionResp.split("\n\n")[0], /^me (manda|envia|envie) a foto/i, "primeira linha não começa com pedido de foto");
+
+// Gate de confusão: "não entendi" após pedido de foto → explicação, não repetir pedido
+const confusionGateResult = normalizeCommercialResponse(
+  "Me envie a foto que você quer restaurar, assim eu consigo avaliar melhor.",
+  {
+    incomingText: "não entendi",
+    recentHistory: [
+      "Lead: Oi",
+      "Atendente: Consigo te ajudar sim 😊 me manda a foto que você quer restaurar aqui.",
+    ],
+    hasPhoto: false,
+    summary: null,
+  },
+);
+assert.doesNotMatch(confusionGateResult, /^me (manda|envia|envie) a foto/i, "confusão: não começa com pedido de foto");
+assert.match(confusionGateResult, /funciona|r\$|pix|24h/i, "confusão: explica o processo ou valor");
+
+// ensureSalesCTA com confusão + foto já pedida: não deve acrescentar CTA de foto
+const confusionCtaResult = ensureSalesCTA(
+  "Consigo te ajudar sim 😊 me manda a foto que você quer restaurar aqui.",
+  {
+    incomingText: "não entendi",
+    recentHistory: [
+      "Atendente: Consigo te ajudar sim 😊 me manda a foto que você quer restaurar aqui.",
+    ],
+    hasPhoto: false,
+    summary: null,
+  },
+);
+// O gate de confusão retorna output sem sobrepor CTA adicional
+// (não deve acrescentar um segundo "me manda a foto aqui que eu vejo pra você")
+const ctaOccurrences = (confusionCtaResult.match(/me manda a foto/gi) || []).length;
+assert.ok(ctaOccurrences <= 1, `CTA de foto não pode aparecer mais de 1× no mesmo turno (apareceu ${ctaOccurrences}×)`);
+
+// ─────────────────────────────────────────────────────────────────
+// Tempo relativo: formatRelativeConversationTime
+// ─────────────────────────────────────────────────────────────────
+
+const T0 = new Date("2026-06-09T14:00:00.000Z").getTime();
+
+// < 1 min → "agora"
+assert.equal(formatRelativeConversationTime(new Date(T0 - 10_000).toISOString(), T0), "agora", "10s atrás → agora");
+assert.equal(formatRelativeConversationTime(new Date(T0 - 30_000).toISOString(), T0), "agora", "30s atrás → agora");
+assert.equal(formatRelativeConversationTime(new Date(T0 - 59_999).toISOString(), T0), "agora", "59s atrás → agora");
+
+// 1–59 min → "X min"
+assert.equal(formatRelativeConversationTime(new Date(T0 - 60_000).toISOString(), T0), "1 min", "60s → 1 min");
+assert.equal(formatRelativeConversationTime(new Date(T0 - 2 * 60_000).toISOString(), T0), "2 min", "2 min → 2 min");
+assert.equal(formatRelativeConversationTime(new Date(T0 - 5 * 60_000).toISOString(), T0), "5 min", "5 min → 5 min");
+assert.equal(formatRelativeConversationTime(new Date(T0 - 10 * 60_000).toISOString(), T0), "10 min", "10 min → 10 min");
+assert.equal(formatRelativeConversationTime(new Date(T0 - 30 * 60_000).toISOString(), T0), "30 min", "30 min → 30 min");
+assert.equal(formatRelativeConversationTime(new Date(T0 - 59 * 60_000).toISOString(), T0), "59 min", "59 min → 59 min");
+
+// 1–23 h → "X h"
+assert.equal(formatRelativeConversationTime(new Date(T0 - 60 * 60_000).toISOString(), T0), "1 h", "1h → 1 h");
+assert.equal(formatRelativeConversationTime(new Date(T0 - 2 * 3600_000).toISOString(), T0), "2 h", "2h → 2 h");
+assert.equal(formatRelativeConversationTime(new Date(T0 - 23 * 3600_000).toISOString(), T0), "23 h", "23h → 23 h");
+
+// 1–6 d → "X d"
+assert.equal(formatRelativeConversationTime(new Date(T0 - 24 * 3600_000).toISOString(), T0), "1 d", "1d → 1 d");
+assert.equal(formatRelativeConversationTime(new Date(T0 - 2 * 86400_000).toISOString(), T0), "2 d", "2d → 2 d");
+
+// ≥ 7 d → "dd/MM"
+assert.match(formatRelativeConversationTime(new Date(T0 - 7 * 86400_000).toISOString(), T0), /\d{2}\/\d{2}/, "7d → dd/MM");
+
+// clock skew (futuro) → "agora"
+assert.equal(formatRelativeConversationTime(new Date(T0 + 5_000).toISOString(), T0), "agora", "clock skew → agora");
+
+// nunca mostra "2 min" para mensagem recém-chegada (diffMs = 5s)
+const recentMsg = new Date(T0 - 5_000).toISOString();
+assert.notEqual(formatRelativeConversationTime(recentMsg, T0), "2 min", "5s atrás nunca → 2 min");
 
 console.log("AI safety scenarios OK");
