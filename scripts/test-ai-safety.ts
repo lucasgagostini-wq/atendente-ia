@@ -12,7 +12,9 @@ import {
   buildConfusionExplanationResponse,
   buildExpectedPaymentData,
   buildInvalidReceiptResponse,
+  buildOfferClarificationResponse,
   buildPostReceiptResponse,
+  buildPriceAnswer,
   conversationHasServiceImage,
   detectEmotionalContext,
   detectIfWaitingPaymentReceipt,
@@ -21,11 +23,14 @@ import {
   detectObjectionType,
   detectPaymentIntent,
   detectPaymentReceipt,
+  detectPriceQuestion,
   detectServiceType,
+  enforceFinalSafety,
   ensureSalesCTA,
   hasRecentPixContext,
   isAffirmativeConfirmation,
   isConfusionSignal,
+  lastAssistantMadeOfferOrPrice,
   lastAssistantOfferedPix,
   markServiceImageReceived,
   normalizeCommercialResponse,
@@ -739,6 +744,102 @@ const confusionCtaResult = ensureSalesCTA(
 // (não deve acrescentar um segundo "me manda a foto aqui que eu vejo pra você")
 const ctaOccurrences = (confusionCtaResult.match(/me manda a foto/gi) || []).length;
 assert.ok(ctaOccurrences <= 1, `CTA de foto não pode aparecer mais de 1× no mesmo turno (apareceu ${ctaOccurrences}×)`);
+
+// ─────────────────────────────────────────────────────────────────
+// Caso A — gate de preço (detectPriceQuestion / buildPriceAnswer)
+// ─────────────────────────────────────────────────────────────────
+
+assert.equal(detectPriceQuestion("Boa tarde. Gostaria de saber antes o valor"), true);
+assert.equal(detectPriceQuestion("quanto custa?"), true);
+assert.equal(detectPriceQuestion("quanto fica pra fazer?"), true);
+assert.equal(detectPriceQuestion("qual o valor?"), true);
+assert.equal(detectPriceQuestion("tem preço?"), true);
+// NÃO é pergunta de preço:
+assert.equal(detectPriceQuestion("quanto tempo demora?"), false, "prazo não é preço");
+assert.equal(detectPriceQuestion("essa foto tem um valor enorme pra mim"), false, "valor emocional não é preço");
+assert.equal(detectPriceQuestion("oi, quero restaurar"), false);
+
+// Sem foto → responde o preço primeiro, convida a foto depois.
+const priceNoPhoto = buildPriceAnswer({ incomingText: "qual o valor?", recentHistory: [], hasPhoto: false });
+assert.match(priceNoPhoto, /r\$\s*10/i, "preço presente");
+assert.doesNotMatch(priceNoPhoto.split("\n\n")[0], /^me (manda|envia) a foto|^pode me mandar a foto/i, "primeira linha é o preço, não pedido de foto");
+
+// Com foto → preço + Pix, sem pedir foto.
+const priceWithPhoto = buildPriceAnswer({ incomingText: "quanto fica?", recentHistory: [], hasPhoto: true });
+assert.match(priceWithPhoto, /r\$\s*10/i);
+assert.match(priceWithPhoto, /pix/i);
+assert.doesNotMatch(priceWithPhoto, /manda a foto|envia a foto/i);
+
+// ─────────────────────────────────────────────────────────────────
+// Caso C — esclarecimento de oferta (lastAssistantMadeOfferOrPrice / buildOfferClarificationResponse)
+// ─────────────────────────────────────────────────────────────────
+
+assert.equal(
+  lastAssistantMadeOfferOrPrice(["Atendente: Pra fazer essa foto fica R$10. Quer que eu te mande o Pix?"]),
+  true,
+);
+assert.equal(
+  lastAssistantMadeOfferOrPrice(["Atendente: Consigo tirar a pessoa do meio dessa foto."]),
+  true,
+);
+assert.equal(lastAssistantMadeOfferOrPrice(["Atendente: Oi, tudo bem?"]), false);
+assert.equal(lastAssistantMadeOfferOrPrice([]), false);
+
+// Esclarecimento com foto e edição → reconhece a edição, dá preço, puxa Pix,
+// sem repetir o bloco anterior literalmente.
+const clarif = buildOfferClarificationResponse({
+  incomingText: "?",
+  recentHistory: [
+    "Atendente: Recebi a foto. Dá pra trabalhar nela.",
+    "Atendente: Tirar a pessoa do meio fica natural.",
+    "Atendente: Pra fazer essa foto fica R$10. Quer que eu te mande o Pix?",
+  ],
+  hasPhoto: true,
+});
+assert.match(clarif, /r\$\s*10/i);
+assert.match(clarif, /pix/i);
+assert.doesNotMatch(clarif, /pra fazer essa foto fica r\$10\. quer que eu te mande o pix\?/i, "não repete o bloco literal");
+
+// Esclarecimento pós-Pix → pede comprovante, não reabre venda.
+const clarifPostPix = buildOfferClarificationResponse({
+  incomingText: "como assim?",
+  recentHistory: [
+    "Atendente: O Pix é estudiofotos000@gmail.com",
+    "Atendente: Nome: Lucas Agostini — Nubank",
+  ],
+  hasPhoto: true,
+  summary: "[PAGAMENTO: WAITING_PAYMENT_RECEIPT]",
+});
+assert.match(clarifPostPix, /comprovante/i);
+assert.doesNotMatch(clarifPostPix, /quer que eu te mande o pix/i);
+
+// ─────────────────────────────────────────────────────────────────
+// Caso F — rede de segurança final (enforceFinalSafety)
+// ─────────────────────────────────────────────────────────────────
+
+// Tem foto → remove pedido genérico de foto.
+const guardedPhoto = enforceFinalSafety("Beleza! Me manda a foto aqui que eu vejo pra você.", {
+  incomingText: "e agora?",
+  recentHistory: [],
+  hasPhoto: true,
+});
+assert.doesNotMatch(guardedPhoto, /manda a foto|envia a foto/i, "não pode pedir foto quando já tem foto");
+
+// Perguntou preço e a resposta não tem preço → injeta o preço.
+const guardedPrice = enforceFinalSafety("Claro, consigo te ajudar com isso!", {
+  incomingText: "quanto custa?",
+  recentHistory: [],
+  hasPhoto: false,
+});
+assert.match(guardedPrice, /r\$\s*10/i, "injeta o preço quando o cliente perguntou e a resposta não tinha");
+
+// Cliente pergunta COMO enviar a foto → pode falar de foto (não é re-pedido indevido).
+const guardedHowTo = enforceFinalSafety("Pode me mandar a foto aqui mesmo no WhatsApp.", {
+  incomingText: "como faço pra mandar a foto?",
+  recentHistory: [],
+  hasPhoto: true,
+});
+assert.match(guardedHowTo, /foto/i, "quando o cliente pergunta COMO enviar, a resposta pode falar de foto");
 
 // ─────────────────────────────────────────────────────────────────
 // Tempo relativo: formatRelativeConversationTime

@@ -22,17 +22,23 @@ import {
 import type { PixReceiptAnalysis } from "../../services/payment-receipt.service";
 import {
   buildAudioClarificationResponse,
+  buildOfferClarificationResponse,
+  buildPriceAnswer,
   conversationHasServiceImage,
   detectIfWaitingPaymentReceipt,
   detectIfPaymentReceiptInvalid,
   detectIfPaymentReceiptReceived,
   detectPaymentIntent,
   detectPaymentReceipt,
+  detectPriceQuestion,
   detectServiceType,
   buildInvalidReceiptResponse,
   buildPostReceiptResponse,
+  enforceFinalSafety,
   ensureSalesCTA,
   hasRecentPixContext,
+  isConfusionSignal,
+  lastAssistantMadeOfferOrPrice,
   normalizeCommercialResponse,
   sanitizeAIResponse,
   sendPixAsSeparateMessage,
@@ -47,11 +53,15 @@ export type ConversationState = {
   batch: SimMessage[];
   mockModelResponse?: string;
   mockReceiptAnalysis?: Partial<PixReceiptAnalysis>;
+  /** Estado persistente de foto (coluna Lead.hasReceivedImage). */
+  hasReceivedImagePersisted?: boolean;
 };
 
 export type SimRoute =
   | "payment_receipt"
   | "payment_intent"
+  | "price_answer"
+  | "offer_clarification"
   | "ai_response"
   | "post_receipt_state"
   | "invalid_receipt_state"
@@ -116,11 +126,17 @@ export function simulateConversation(state: ConversationState): SimResult {
   const isReceiptReceived = detectIfPaymentReceiptReceived(summary);
   const isReceiptInvalid = detectIfPaymentReceiptInvalid(summary);
 
+  // Estado persistente de foto: burst atual OU coluna Lead.hasReceivedImage OU
+  // marcador legado/histórico. Robusto à janela curta de histórico.
   const conversationHasPhoto = conversationHasServiceImage({
     recentHistory,
     summary,
-    hasPhoto: batchHasPhoto,
+    hasPhoto: batchHasPhoto || Boolean(state.hasReceivedImagePersisted),
   });
+
+  // Texto SÓ da mensagem atual (último item do batch) — usado pelos gates que
+  // dependem da intenção atual, não do histórico inteiro.
+  const currentIncomingText = state.batch.at(-1)?.content ?? "";
 
   const flags = {
     hasServiceImage: conversationHasPhoto,
@@ -188,6 +204,36 @@ export function simulateConversation(state: ConversationState): SimResult {
     return { route: "audio_clarification", messages: [message], finalText: message, flags };
   }
 
+  // ── Gate 2.6: esclarecimento de oferta (Caso C) ─────────────
+  // "?", "como assim", "não entendi" DEPOIS de oferta/preço/Pix → esclarece sem
+  // repetir o bloco anterior nem reiniciar o fluxo.
+  if (
+    isConfusionSignal(currentIncomingText) &&
+    (conversationHasPhoto || lastAssistantMadeOfferOrPrice(recentHistory))
+  ) {
+    const text = buildOfferClarificationResponse({
+      incomingText: batchedIncomingText,
+      recentHistory,
+      hasPhoto: conversationHasPhoto,
+      summary,
+    });
+    const messages = splitResponseIntoWhatsAppMessages(text);
+    return { route: "offer_clarification", messages, finalText: messages.join("\n"), flags };
+  }
+
+  // ── Gate 2.7: preço antes da foto (Caso A) ──────────────────
+  // Cliente pergunta o valor sem ter mandado foto → responde o preço direto.
+  if (detectPriceQuestion(currentIncomingText) && !conversationHasPhoto) {
+    const text = buildPriceAnswer({
+      incomingText: batchedIncomingText,
+      recentHistory,
+      hasPhoto: conversationHasPhoto,
+      summary,
+    });
+    const messages = splitResponseIntoWhatsAppMessages(text);
+    return { route: "price_answer", messages, finalText: messages.join("\n"), flags };
+  }
+
   // ── Gate 3: resposta da IA + guardrails ─────────────────────
   const aiRecentHistory = recentHistory.slice(-6);
   const aiSafetyContext = {
@@ -200,7 +246,8 @@ export function simulateConversation(state: ConversationState): SimResult {
   const safe = sanitizeAIResponse(state.mockModelResponse ?? "", aiSafetyContext);
   const withCta = ensureSalesCTA(safe.output, aiSafetyContext);
   const commercial = normalizeCommercialResponse(withCta, aiSafetyContext);
-  const messages = splitResponseIntoWhatsAppMessages(commercial);
+  const guarded = enforceFinalSafety(commercial, aiSafetyContext);
+  const messages = splitResponseIntoWhatsAppMessages(guarded);
 
   return {
     route: "ai_response",

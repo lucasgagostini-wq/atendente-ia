@@ -25,12 +25,14 @@ import {
   dedupeBatchParts,
   extractOutgoingPayload,
   extractIncomingPayload,
+  isMediaPendingActive,
   isPendingMessageReceiptAttachment,
   isPendingMessageServicePhoto,
   isAudioOnlyBatchWithoutTranscription,
   normalizePhone,
   receiptDecisionFromAnalysis,
   shouldTransferToHuman,
+  shouldWaitForIncomingMedia,
   type IncomingPayload,
   type PendingInboundMessage,
   type ReceiptPaymentStage,
@@ -42,23 +44,27 @@ import {
   buildAudioClarificationResponse,
   buildInvalidReceiptResponse,
   buildExpectedPaymentData,
+  buildOfferClarificationResponse,
   buildPostReceiptResponse,
+  buildPriceAnswer,
   conversationHasServiceImage,
   detectPaymentIntent,
   detectPaymentReceipt,
+  detectPriceQuestion,
   detectIfPaymentReceiptInvalid,
   detectIfPaymentReceiptReceived,
   detectIfWaitingPaymentReceipt,
   detectServiceType,
+  enforceFinalSafety,
   ensureSalesCTA,
   hasRecentPixContext,
-  markServiceImageReceived,
+  isConfusionSignal,
+  lastAssistantMadeOfferOrPrice,
   normalizeCommercialResponse,
   safeFallbackForStage,
   sanitizeAIResponse,
   sendPixAsSeparateMessage,
   splitResponseIntoWhatsAppMessages,
-  summaryHasServiceImage,
   updateConversationStage,
   validatePromptMaster,
 } from "@/services/ai-safety.service";
@@ -102,12 +108,42 @@ type PendingInboundBatchState = {
   silenceWindowMs: number;
   elapsedSinceFirstMs: number;
   quietForMs: number;
+  pendingMediaAt: Date | null;
 };
 
 const TEXT_SILENCE_WINDOW_MS = 4000;
 const BATCH_SILENCE_WINDOW_MS = 6000;
 const MAX_BATCH_WAIT_MS = 12000;
 const SILENCE_POLL_INTERVAL_MS = 400;
+// isMediaPendingActive / shouldWaitForIncomingMedia / MEDIA_PENDING_TTL_MS vêm de
+// lib/webhook-helpers.ts (puros e testáveis).
+
+/**
+ * Detecta o sinal leve MEDIA_PENDING emitido pelo bridge ANTES de baixar a
+ * mídia. Não contém a mensagem em si — só sinaliza "tem imagem a caminho deste
+ * lead" para o webhook estender a janela de silêncio.
+ */
+function extractMediaPendingSignal(payload: any): {
+  phone: string;
+  profileSlug?: string | null;
+} | null {
+  const event = payload?.event || payload?.data?.event;
+  if (event !== "MEDIA_PENDING") return null;
+
+  const rawPhone =
+    payload?.data?.phone || payload?.phone || payload?.data?.number || payload?.number || "";
+  const phone = normalizePhone(String(rawPhone));
+  if (!phone) return null;
+
+  const profileSlug =
+    typeof payload?.data?.profileSlug === "string"
+      ? payload.data.profileSlug
+      : typeof payload?.profileSlug === "string"
+        ? payload.profileSlug
+        : null;
+
+  return { phone, profileSlug };
+}
 
 // ── Helpers internos (DB/IO-dependentes) ───────────────────────
 // As funções puras foram movidas para lib/webhook-helpers.ts.
@@ -346,24 +382,33 @@ async function getPendingInboundBatchState(args: {
     select: { createdAt: true },
   });
 
-  const pendingMessages = await prisma.message.findMany({
-    where: {
-      conversationId: args.conversationId,
-      leadId: args.leadId,
-      direction: "INBOUND",
-      createdAt: {
-        gt: lastOutboundBeforeCurrent?.createdAt ?? new Date(0),
+  // Lê pendingMessages e o estado de mídia-a-caminho FRESCO a cada poll. O sinal
+  // MEDIA_PENDING pode chegar DEPOIS que esta invocação carregou o lead, então
+  // reler aqui garante que o texto do mesmo burst espere pela imagem.
+  const [pendingMessages, leadState] = await Promise.all([
+    prisma.message.findMany({
+      where: {
+        conversationId: args.conversationId,
+        leadId: args.leadId,
+        direction: "INBOUND",
+        createdAt: {
+          gt: lastOutboundBeforeCurrent?.createdAt ?? new Date(0),
+        },
       },
-    },
-    orderBy: { createdAt: "asc" },
-    select: {
-      id: true,
-      content: true,
-      type: true,
-      metadata: true,
-      createdAt: true,
-    },
-  });
+      orderBy: { createdAt: "asc" },
+      select: {
+        id: true,
+        content: true,
+        type: true,
+        metadata: true,
+        createdAt: true,
+      },
+    }),
+    prisma.lead.findUnique({
+      where: { id: args.leadId },
+      select: { pendingMediaAt: true },
+    }),
+  ]);
 
   const firstMessage = pendingMessages[0] ?? null;
   const latestMessage = pendingMessages.at(-1) ?? null;
@@ -381,6 +426,7 @@ async function getPendingInboundBatchState(args: {
     silenceWindowMs,
     elapsedSinceFirstMs,
     quietForMs,
+    pendingMediaAt: leadState?.pendingMediaAt ?? null,
   };
 }
 
@@ -407,6 +453,7 @@ async function waitForInboundSilence(args: {
   leadId: string;
   currentInboundId: string;
   currentInboundCreatedAt: Date;
+  pendingMediaAt?: Date | null;
 }) {
   while (true) {
     const batchState = await getPendingInboundBatchState({
@@ -431,9 +478,27 @@ async function waitForInboundSilence(args: {
       };
     }
 
+    // Mídia a caminho deste lead (sinal MEDIA_PENDING do bridge) e ainda não
+    // chegou ao batch: NÃO finalizar pela janela curta — segurar até a imagem
+    // entrar no mesmo batch do texto (ou até o teto MAX_BATCH_WAIT_MS). Usa o
+    // valor FRESCO (relido a cada poll) e também o inicial como fallback.
+    const effectivePendingMediaAt = isMediaPendingActive(batchState.pendingMediaAt)
+      ? batchState.pendingMediaAt
+      : args.pendingMediaAt ?? null;
+    const mediaIncoming = shouldWaitForIncomingMedia({
+      pendingMediaAt: effectivePendingMediaAt,
+      batchHasMedia: batchState.hasMedia,
+      elapsedSinceFirstMs: batchState.elapsedSinceFirstMs,
+      maxBatchWaitMs: MAX_BATCH_WAIT_MS,
+    });
+
+    // Fecha o batch quando: (a) não há mídia a caminho E o silêncio/ teto bateu,
+    // OU (b) o teto MAX_BATCH_WAIT_MS estourou (shouldWaitForIncomingMedia já
+    // retorna false nesse caso, então mediaIncoming é false aqui).
     if (
-      batchState.quietForMs >= batchState.silenceWindowMs ||
-      batchState.elapsedSinceFirstMs >= MAX_BATCH_WAIT_MS
+      !mediaIncoming &&
+      (batchState.quietForMs >= batchState.silenceWindowMs ||
+        batchState.elapsedSinceFirstMs >= MAX_BATCH_WAIT_MS)
     ) {
       return {
         skip: false,
@@ -444,7 +509,11 @@ async function waitForInboundSilence(args: {
 
     const remainingSilenceMs = batchState.silenceWindowMs - batchState.quietForMs;
     const remainingBatchMs = MAX_BATCH_WAIT_MS - batchState.elapsedSinceFirstMs;
-    await sleep(Math.max(50, Math.min(remainingSilenceMs, remainingBatchMs, SILENCE_POLL_INTERVAL_MS)));
+    await sleep(
+      mediaIncoming
+        ? Math.max(50, Math.min(remainingBatchMs, SILENCE_POLL_INTERVAL_MS))
+        : Math.max(50, Math.min(remainingSilenceMs, remainingBatchMs, SILENCE_POLL_INTERVAL_MS)),
+    );
   };
 }
 
@@ -487,6 +556,26 @@ export async function POST(request: Request) {
   }
 
   try {
+    // ── Sinal MEDIA_PENDING (mídia a caminho) ────────────────
+    // O bridge emite isso ANTES de baixar a imagem. Marcamos no lead que há
+    // mídia a caminho para o webhook do texto do mesmo burst estender a janela
+    // de silêncio e juntar texto + imagem no mesmo batch.
+    const mediaPending = extractMediaPendingSignal(payload);
+    if (mediaPending) {
+      const profile = await profileService.getProfileBySlug(
+        mediaPending.profileSlug || DEFAULT_PROFILE_SLUG,
+      );
+      const lead = await leadService.upsertByPhone(
+        mediaPending.phone,
+        { source: "whatsapp" },
+        profile.id,
+      );
+      await prisma.lead
+        .update({ where: { id: lead.id }, data: { pendingMediaAt: new Date() } })
+        .catch(() => {});
+      return NextResponse.json({ ok: true, mediaPending: true });
+    }
+
     const incoming = extractIncomingPayload(payload);
     const outgoing = extractOutgoingPayload(payload);
     const inboundProfile = incoming?.profileSlug || outgoing?.profileSlug || DEFAULT_PROFILE_SLUG;
@@ -665,6 +754,7 @@ export async function POST(request: Request) {
       leadId: lead.id,
       currentInboundId: inboundMessage.id,
       currentInboundCreatedAt: inboundMessage.createdAt,
+      pendingMediaAt: lead.pendingMediaAt,
     });
 
     if (silenceResult.skip) {
@@ -693,7 +783,6 @@ export async function POST(request: Request) {
       });
     }
 
-    const recentHistory = await conversationService.getRecentHistory(conversation.id, 10);
     const batchedInboundMessages =
       silenceResult.batchState.messages.length > 0
         ? silenceResult.batchState.messages
@@ -705,6 +794,21 @@ export async function POST(request: Request) {
             metadata: incoming.metadata as Prisma.JsonValue,
             createdAt: inboundMessage.createdAt,
           } satisfies PendingInboundMessage];
+
+    // HISTÓRICO: exclui o batch atual (mensagens >= primeira do batch). Sem isso,
+    // a mensagem que está sendo respondida apareceria DUPLICADA — no HISTORICO do
+    // prompt e como turno `user` — confundindo o modelo.
+    const firstBatchCreatedAt =
+      silenceResult.batchState.firstMessage?.createdAt ?? inboundMessage.createdAt;
+    const recentHistory = await conversationService.getRecentHistory(conversation.id, 10, {
+      beforeCreatedAt: firstBatchCreatedAt,
+    });
+
+    // Texto SÓ da mensagem atual (última do batch) — usado pelos gates de
+    // intenção (preço/confusão), que dependem do que o cliente acabou de dizer.
+    const currentIncomingText =
+      batchedInboundMessages.at(-1)?.content ?? incoming.text;
+
     const batchHasReceiptAttachment = batchedInboundMessages.some((message) =>
       isPendingMessageReceiptAttachment(message),
     );
@@ -728,23 +832,30 @@ export async function POST(request: Request) {
       hasPhoto: batchHasReceiptAttachment,
     });
 
-    // Estado persistente: a foto pode ter chegado em rodadas anteriores e saído
-    // da janela curta de histórico. Considera burst + marca no summary + histórico.
+    // Estado persistente de foto: coluna robusta Lead.hasReceivedImage (sobrevive
+    // à janela de histórico) + burst atual + leitura legada do marcador/histórico
+    // para leads antigos. NÃO depende mais só do regex no summary.
     const conversationHasPhoto = conversationHasServiceImage({
       recentHistory,
       summary: lead.summary,
-      hasPhoto: batchHasPhoto,
+      hasPhoto: batchHasPhoto || lead.hasReceivedImage,
     });
 
-    // Persiste a marca de "foto recebida" cedo, antes de qualquer gate.
-    // Assim, mesmo se o batch cair em Pix determinístico ou outra rota, o lead
-    // nunca volta a ser tratado como se não tivesse enviado foto.
-    if (batchHasPhoto && !hasRecentPixInHistory && !summaryHasServiceImage(lead.summary)) {
-      const updatedSummary = markServiceImageReceived(lead.summary);
-      lead.summary = updatedSummary;
+    // Persiste o estado de foto na COLUNA (não no summary) cedo, antes de qualquer
+    // gate. Uma foto de serviço só conta quando NÃO há Pix recente (senão é
+    // provável comprovante). Assim o lead nunca volta a ser tratado como sem foto.
+    if (batchHasPhoto && !hasRecentPixInHistory && !lead.hasReceivedImage) {
+      const photosInBatch = batchedInboundMessages.filter((message) =>
+        isPendingMessageServicePhoto(message),
+      ).length;
+      lead.hasReceivedImage = true;
       await prisma.lead.update({
         where: { id: lead.id },
-        data: { summary: updatedSummary },
+        data: {
+          hasReceivedImage: true,
+          lastImageAt: new Date(),
+          imageCount: { increment: Math.max(1, photosInBatch) },
+        },
       }).catch(() => {});
     }
 
@@ -1058,24 +1169,112 @@ export async function POST(request: Request) {
       return NextResponse.json(payload);
     }
 
+    // ── Gate determinístico: esclarecimento de oferta (Caso C) ──
+    // "?", "como assim", "não entendi" DEPOIS de oferta/preço/Pix → esclarece a
+    // oferta anterior de forma curta e diferente, sem repetir o bloco nem
+    // reiniciar o fluxo. (Confusão SEM oferta prévia segue para a IA, que tem o
+    // tratamento de explicação de processo.)
+    if (
+      isConfusionSignal(currentIncomingText) &&
+      (conversationHasPhoto || lastAssistantMadeOfferOrPrice(recentHistory))
+    ) {
+      const clarificationContext = {
+        incomingText: batchedIncomingText,
+        recentHistory,
+        hasPhoto: conversationHasPhoto,
+        summary: lead.summary,
+      };
+      const clarificationResponse = buildOfferClarificationResponse(clarificationContext);
+      const clarificationMessages = splitResponseIntoWhatsAppMessages(clarificationResponse);
+
+      emitAiDebug(
+        buildAiDebugSnapshot({
+          leadId: lead.id,
+          phone: lead.phone,
+          funnelStageBefore: lead.funnelStage,
+          funnelStageAfter: lead.funnelStage,
+          batchSize: batchedInboundMessages.length,
+          flags: aiDebugFlags,
+          consolidatedText: batchedIncomingText,
+          rawResponse: null,
+          finalResponse: clarificationResponse,
+          route: "offer_clarification",
+          profileSlug: activeProfile.slug,
+          batchParts: batchedInboundMessages.map((m) => m.type),
+          hadImageBefore: lead.hasReceivedImage,
+          recentHistory,
+        }),
+        prisma,
+      );
+
+      const payload = await saveAndSendMessages({
+        conversationId: conversation.id,
+        leadId: lead.id,
+        phone: lead.phone,
+        messages: clarificationMessages,
+        replyTransport: incoming.replyTransport,
+        typingStartedAt,
+        roundInboundMessageId: inboundMessage.id,
+        metadata: { source: "offer_clarification" } as Prisma.InputJsonValue,
+      });
+
+      return NextResponse.json(payload);
+    }
+
+    // ── Gate determinístico: preço antes da foto (Caso A) ───────
+    // Cliente pergunta o valor sem ter mandado foto → responde o preço direto e
+    // só DEPOIS convida a mandar a foto. Nunca fica só pedindo foto.
+    if (detectPriceQuestion(currentIncomingText) && !conversationHasPhoto) {
+      const priceContext = {
+        incomingText: batchedIncomingText,
+        recentHistory,
+        hasPhoto: conversationHasPhoto,
+        summary: lead.summary,
+      };
+      const priceResponse = buildPriceAnswer(priceContext);
+      const priceMessages = splitResponseIntoWhatsAppMessages(priceResponse);
+
+      emitAiDebug(
+        buildAiDebugSnapshot({
+          leadId: lead.id,
+          phone: lead.phone,
+          funnelStageBefore: lead.funnelStage,
+          funnelStageAfter: lead.funnelStage,
+          batchSize: batchedInboundMessages.length,
+          flags: aiDebugFlags,
+          consolidatedText: batchedIncomingText,
+          rawResponse: null,
+          finalResponse: priceResponse,
+          route: "price_answer",
+          profileSlug: activeProfile.slug,
+          batchParts: batchedInboundMessages.map((m) => m.type),
+          hadImageBefore: lead.hasReceivedImage,
+          recentHistory,
+        }),
+        prisma,
+      );
+
+      const payload = await saveAndSendMessages({
+        conversationId: conversation.id,
+        leadId: lead.id,
+        phone: lead.phone,
+        messages: priceMessages,
+        replyTransport: incoming.replyTransport,
+        typingStartedAt,
+        roundInboundMessageId: inboundMessage.id,
+        metadata: { source: "price_answer" } as Prisma.InputJsonValue,
+      });
+
+      return NextResponse.json(payload);
+    }
+
     // ── Resposta da IA ───────────────────────────────────────
     const prompt = await promptService.getActivePrompt(activeProfile.id);
     const aiRecentHistory = recentHistory.slice(-6);
     const aiIncomingText = batchedIncomingText;
 
-    // Persiste a marca de "foto recebida" para que as próximas rodadas nunca
-    // peçam a foto de novo, mesmo que ela saia da janela de histórico.
-    if (batchHasPhoto && !hasRecentPixInHistory && !summaryHasServiceImage(lead.summary)) {
-      const updatedSummary = markServiceImageReceived(lead.summary);
-      lead.summary = updatedSummary;
-      await prisma.lead.update({
-        where: { id: lead.id },
-        data: { summary: updatedSummary },
-      }).catch(() => {});
-    }
-
     // Contexto único de segurança/guardrails — usa o estado consolidado de foto
-    // (burst + summary + histórico), não só o burst atual.
+    // (coluna persistente + burst + histórico), não só o burst atual.
     const aiSafetyContext = {
       incomingText: aiIncomingText,
       recentHistory: aiRecentHistory,
@@ -1131,7 +1330,10 @@ export async function POST(request: Request) {
 
     const safeResponse = sanitizeAIResponse(aiResponse.output, aiSafetyContext);
     const commercialDraft = ensureSalesCTA(safeResponse.output, aiSafetyContext);
-    const commercialResponse = normalizeCommercialResponse(commercialDraft, aiSafetyContext);
+    const normalizedResponse = normalizeCommercialResponse(commercialDraft, aiSafetyContext);
+    // Rede de segurança FINAL (Caso F): tem foto → nunca pedir foto; perguntou
+    // preço → resposta tem preço. Independe do que o modelo gerou.
+    const commercialResponse = enforceFinalSafety(normalizedResponse, aiSafetyContext);
 
     emitAiDebug(
       buildAiDebugSnapshot({
@@ -1145,6 +1347,12 @@ export async function POST(request: Request) {
         rawResponse: aiResponse.output,
         finalResponse: commercialResponse,
         route: "ai_response",
+        profileSlug: activeProfile.slug,
+        batchParts: batchedInboundMessages.map((m) => m.type),
+        hadImageBefore: lead.hasReceivedImage,
+        recentHistory: aiRecentHistory,
+        promptUsed: systemPrompt,
+        blockReason: safeResponse.blocked ? safeResponse.reason ?? null : null,
       }),
       prisma,
     );

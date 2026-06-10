@@ -101,7 +101,10 @@ export const fixtures: Fixture[] = [
     mockModelResponse:
       "Consigo deixar a imagem bem melhor preservando o visual original da pessoa com cuidado.\n\nÉ só confirmar que eu já sigo.",
     expect: {
-      route: "ai_response",
+      // Agora tratado por gate determinístico (esclarece a oferta, não repete o
+      // bloco). O modelo nem chega a ser chamado.
+      route: "offer_clarification",
+      required: [/r\$\s*10|pix/i],
       forbidden: [/preservando o visual original da pessoa com cuidado/i, ...POST_PHOTO_FORBIDDEN],
       maxMessages: 2,
     },

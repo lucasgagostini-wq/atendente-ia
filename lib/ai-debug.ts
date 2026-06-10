@@ -24,13 +24,26 @@ export type AiDebugFlags = {
 export type AiDebugSnapshot = {
   leadIdMasked: string;
   phoneMasked: string;
+  profileSlug: string | null;
   funnelStageBefore: string | null;
   funnelStageAfter: string | null;
   batchSize: number;
+  /** Tipos das partes do batch atual: ["TEXT","IMAGE",...] — sem conteúdo bruto. */
+  batchParts: string[];
+  /** Havia imagem no batch atual? (derivado de batchParts) */
+  batchHasImage: boolean;
+  /** O lead já tinha foto recebida ANTES deste batch (coluna persistente)? */
+  hadImageBefore: boolean;
   flags: AiDebugFlags;
   consolidatedText: string;
+  /** Histórico enviado ao modelo (redigido, sem base64/secrets). */
+  recentHistory: string[];
+  /** Prompt de sistema usado (redigido e truncado). */
+  promptUsed: string | null;
   rawResponse: string | null;
   finalResponse: string | null;
+  /** Motivo de bloqueio/sanitização, se houve. */
+  blockReason: string | null;
   route: string;
 };
 
@@ -79,25 +92,40 @@ export function redactText(text?: string | null, maxLength = 600) {
 export function buildAiDebugSnapshot(input: {
   leadId: string;
   phone: string;
+  profileSlug?: string | null;
   funnelStageBefore?: string | null;
   funnelStageAfter?: string | null;
   batchSize: number;
+  batchParts?: string[];
+  hadImageBefore?: boolean;
   flags: AiDebugFlags;
   consolidatedText: string;
+  recentHistory?: string[];
+  promptUsed?: string | null;
   rawResponse?: string | null;
   finalResponse?: string | null;
+  blockReason?: string | null;
   route: string;
 }): AiDebugSnapshot {
+  const batchParts = input.batchParts ?? [];
   return {
     leadIdMasked: maskId(input.leadId),
     phoneMasked: maskPhone(input.phone),
+    profileSlug: input.profileSlug ?? null,
     funnelStageBefore: input.funnelStageBefore ?? null,
     funnelStageAfter: input.funnelStageAfter ?? null,
     batchSize: input.batchSize,
+    batchParts,
+    batchHasImage: batchParts.includes("IMAGE"),
+    hadImageBefore: Boolean(input.hadImageBefore),
     flags: input.flags,
     consolidatedText: redactText(input.consolidatedText),
+    // Cada linha do histórico é redigida (remove base64/keys/db-url) e truncada.
+    recentHistory: (input.recentHistory ?? []).map((line) => redactText(line, 200)),
+    promptUsed: input.promptUsed != null ? redactText(input.promptUsed, 800) : null,
     rawResponse: input.rawResponse != null ? redactText(input.rawResponse) : null,
     finalResponse: input.finalResponse != null ? redactText(input.finalResponse) : null,
+    blockReason: input.blockReason ?? null,
     route: input.route,
   };
 }

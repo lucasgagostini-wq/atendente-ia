@@ -273,6 +273,40 @@ export function extractOutgoingPayload(payload: any): OutgoingPayload | null {
   return extractPayload(payload, { requireFromMe: true }) as OutgoingPayload | null;
 }
 
+// ── Batching de mídia (Caso B) ──────────────────────────────────
+// O bridge emite MEDIA_PENDING antes de baixar a imagem. Enquanto o sinal
+// estiver "ativo", o webhook do texto do mesmo burst segura a janela de silêncio
+// para a imagem entrar no MESMO batch.
+export const MEDIA_PENDING_TTL_MS = 15000;
+
+/** Verdadeiro se há um sinal MEDIA_PENDING recente (dentro do TTL). */
+export function isMediaPendingActive(
+  pendingMediaAt?: Date | null,
+  now: number = Date.now(),
+) {
+  if (!pendingMediaAt) return false;
+  return now - pendingMediaAt.getTime() < MEDIA_PENDING_TTL_MS;
+}
+
+/**
+ * Decide se o webhook deve continuar esperando por uma imagem a caminho antes de
+ * fechar o batch: há sinal MEDIA_PENDING ativo, a mídia ainda não chegou ao
+ * batch, e ainda não estouramos o teto de espera.
+ */
+export function shouldWaitForIncomingMedia(args: {
+  pendingMediaAt?: Date | null;
+  batchHasMedia: boolean;
+  elapsedSinceFirstMs: number;
+  maxBatchWaitMs: number;
+  now?: number;
+}) {
+  return (
+    isMediaPendingActive(args.pendingMediaAt, args.now ?? Date.now()) &&
+    !args.batchHasMedia &&
+    args.elapsedSinceFirstMs < args.maxBatchWaitMs
+  );
+}
+
 // Marcador de áudio sem transcrição (injetado em extractIncomingPayload).
 export const AUDIO_PLACEHOLDER_PATTERN = /^🎙️ áudio anexado|^cliente enviou um [aá]udio\.?$/i;
 

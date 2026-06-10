@@ -941,6 +941,101 @@ function dedupeRepeatedLines(lines: string[]) {
   return unique;
 }
 
+// ── Gate determinístico de PREÇO (Caso A) ─────────────────────────
+// Quando o cliente pergunta o valor ANTES de mandar foto, responde o preço
+// direto (e só depois convida a mandar a foto). Não pode ficar só pedindo foto.
+const PRICE_QUESTION_PATTERN =
+  /\bpre[cç]os?\b|\bvalores\b|quanto\s+(custa|fica|sai|é|e|seria|cobra|cobram|ficaria|vai\s+(custar|sair|ficar)|pra|por|que\s+(custa|fica|sai))|quanto\s+(pra|por)\b|qual\s+(o\s+|é\s+o\s+)?(pre[cç]o|valor)|tabela\s+de\s+(pre[cç]o|valor)|sai\s+por\s+quanto|fica\s+quanto|saber\s+(antes\s+)?o\s+(valor|pre[cç]o)|o\s+valor\s+(da|de|do|pra|por|disso|desse|dessa|fica|seria)/i;
+
+export function detectPriceQuestion(text?: string | null) {
+  return PRICE_QUESTION_PATTERN.test(normalize(text).toLowerCase());
+}
+
+/** Resposta determinística de preço. Com foto → preço + Pix; sem foto → preço primeiro, foto depois. */
+export function buildPriceAnswer(context: SafetyContext = {}) {
+  if (hasPhotoInContext(context)) {
+    return [
+      "Pra fazer 1 foto fica R$10. Se forem mais, tenho pacotes: 2 por R$18, 5 por R$29.",
+      "Quer que eu te mande o Pix?",
+    ].join("\n\n");
+  }
+
+  return [
+    "A restauração de 1 foto fica R$10. Se forem mais, tenho pacotes: 2 por R$18, 5 por R$29, 10 por R$39, 20 por R$58.",
+    "Pode me mandar a foto por aqui que eu vejo certinho pra você.",
+  ].join("\n\n");
+}
+
+// ── Gate determinístico de ESCLARECIMENTO de oferta (Caso C) ───────
+// Lead manda "?", "como assim", "não entendi" DEPOIS de uma oferta/preço/Pix
+// (com ou sem foto já recebida). Não pode repetir o bloco anterior nem reiniciar
+// o fluxo: esclarece a oferta de forma curta e diferente.
+const ASSISTANT_OFFER_OR_PRICE_PATTERN =
+  /r\$\s*\d|pre[cç]o|fica r\$|quer que eu te (mande|passe) o pix|te (mando|passo) o pix|posso te (mandar|passar) o pix|\bpix\b|comprovante|consigo (fazer|restaurar|tirar|trabalhar|deixar|melhorar)|d[aá] pra (fazer|trabalhar|restaurar|melhorar)/i;
+
+export function lastAssistantMadeOfferOrPrice(recentHistory: string[] = []) {
+  const assistantLines = recentHistory.filter((line) => /^\s*atendente:/i.test(line));
+  const lastTwo = assistantLines.slice(-2).join("\n").toLowerCase();
+  return ASSISTANT_OFFER_OR_PRICE_PATTERN.test(lastTwo);
+}
+
+export function buildOfferClarificationResponse(context: SafetyContext = {}) {
+  const serviceType = detectServiceType(context);
+  const ack =
+    serviceType === "simple_edit"
+      ? "Isso 😊 consigo fazer essa edição e deixar natural, mantendo o rosto."
+      : "Isso 😊 consigo restaurar a foto com cuidado pra ficar natural.";
+
+  if (pixDataAlreadySent(context)) {
+    return `${ack}\n\nAssim que você me mandar o comprovante, eu começo por aqui.`;
+  }
+
+  return `${ack}\n\nEsse serviço fica R$10. Quer que eu te mande o Pix?`;
+}
+
+/**
+ * Rede de segurança FINAL (Caso F) aplicada depois de todos os guardrails, na
+ * rota da IA. Hard-enforce de invariantes de estado independentemente do que o
+ * modelo gerou:
+ *  - tem foto → nunca pedir foto genérica (exceto se o cliente perguntou COMO enviar);
+ *  - perguntou preço → resposta tem que conter o preço;
+ *  - "?" / confusão → nunca repetir literalmente o bloco anterior do atendente.
+ */
+const ASKS_HOW_TO_SEND_PHOTO_PATTERN =
+  /como (eu )?(mando|envio|te mando|fa[cç]o pra (mandar|enviar)|consigo (mandar|enviar))|por onde (mando|envio|te mando)|onde (mando|envio)|manda como|envio como/i;
+
+export function enforceFinalSafety(response: string, context: SafetyContext = {}) {
+  let output = normalize(response);
+  if (!output) return output;
+
+  const askedHowToSend = ASKS_HOW_TO_SEND_PHOTO_PATTERN.test(normalize(context.incomingText));
+
+  // 1. Tem foto → remover pedidos genéricos de foto.
+  if (hasPhotoInContext(context) && asksForPhotoAgain(output) && !askedHowToSend) {
+    const kept = output
+      .split(/\n+/)
+      .map((line) => line.trim())
+      .filter((line) => line && !asksForPhotoAgain(line));
+
+    output =
+      kept.join("\n\n").trim() ||
+      "Recebi a foto. Dá pra trabalhar nela com cuidado, mantendo o rosto natural. Pra fazer essa fica R$10. Quer que eu te mande o Pix?";
+  }
+
+  // 2. Perguntou preço e a resposta não tem preço → injeta o preço.
+  if (
+    detectPriceQuestion(context.incomingText) &&
+    !/r\$\s*\d/i.test(output) &&
+    !pixDataAlreadySent(context) &&
+    !detectIfPaymentReceiptReceived(context.summary) &&
+    !detectIfPaymentReceiptInvalid(context.summary)
+  ) {
+    output = `A restauração de 1 foto fica R$10.\n\n${output}`.trim();
+  }
+
+  return output;
+}
+
 export function normalizeCommercialResponse(response: string, context: SafetyContext = {}) {
   let output = normalize(response);
   if (!output) return output;

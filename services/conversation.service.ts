@@ -164,9 +164,27 @@ class ConversationService {
     return message;
   }
 
-  async getRecentHistory(conversationId: string, take = 15) {
+  /**
+   * Histórico recente da conversa, em ordem cronológica, no formato
+   * "Lead: ..." / "Atendente: ...".
+   *
+   * `options.beforeCreatedAt`: quando informado, retorna SÓ mensagens anteriores
+   * a esse instante. Usado para EXCLUIR o batch atual do histórico — a mensagem
+   * que está sendo respondida já vai como turno `user` da IA; sem isso ela
+   * apareceria duplicada (no HISTORICO e na pergunta), confundindo o modelo.
+   */
+  async getRecentHistory(
+    conversationId: string,
+    take = 15,
+    options: { beforeCreatedAt?: Date } = {},
+  ) {
     const messages = await prisma.message.findMany({
-      where: { conversationId },
+      where: {
+        conversationId,
+        ...(options.beforeCreatedAt
+          ? { createdAt: { lt: options.beforeCreatedAt } }
+          : {}),
+      },
       orderBy: { createdAt: "desc" },
       take,
     });

@@ -108,6 +108,17 @@ model Lead {
   objections     Json?
   lastMessage    String?
   lastMessageAt  DateTime?
+  // Estado persistente de mídia/foto de serviço. Substitui o marcador frágil
+  // [FOTO_RECEBIDA] no summary: depois que o lead manda uma foto, esse estado
+  // sobrevive à janela curta de histórico e é consultado pelos gates e pela
+  // safety final para nunca mais pedir a foto.
+  hasReceivedImage Boolean      @default(false)
+  lastImageAt      DateTime?
+  imageCount       Int          @default(0)
+  // Marca de "mídia a caminho": o bridge sinaliza MEDIA_PENDING antes de baixar
+  // a imagem, para o webhook estender a janela de silêncio e juntar texto+imagem
+  // do mesmo burst no mesmo batch.
+  pendingMediaAt   DateTime?
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
   profile        Profile?       @relation(fields: [profileId], references: [id], onDelete: SetNull)

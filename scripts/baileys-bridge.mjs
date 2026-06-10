@@ -649,6 +649,19 @@ async function startSocket(options = {}) {
           continue;
         }
 
+        // Sinal MEDIA_PENDING: para mensagens com mídia, avisa o servidor ANTES
+        // de baixar/subir a imagem (operação lenta). Assim o webhook do texto do
+        // MESMO burst estende a janela de silêncio e junta texto + imagem no
+        // mesmo batch, em vez de responder o texto sozinho (pedindo a foto) antes
+        // da imagem chegar. Fire-and-forget para não atrasar o fluxo.
+        const inboundMediaKind = detectMediaKind(message.message);
+        if (inboundMediaKind !== "TEXT") {
+          emitWebhook({
+            event: "MEDIA_PENDING",
+            data: { profileSlug, phone, mediaKind: inboundMediaKind },
+          }).catch(() => {});
+        }
+
         const bridgeStartedAt = Date.now();
         const activityVersion = nextLeadActivityVersion(phone);
         const initialTypingDelayMs = getInitialTypingDelayMs(message);

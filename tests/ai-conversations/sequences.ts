@@ -14,8 +14,11 @@ import {
   ALWAYS_FORBIDDEN,
   DEADLINE_PHRASE_FORBIDDEN,
   POST_PHOTO_FORBIDDEN,
+  POST_PIX_FORBIDDEN,
   POST_RECEIPT_FORBIDDEN,
+  REQUIRED_ACKNOWLEDGES_SERVICE,
   REQUIRED_DEADLINE_24H,
+  REQUIRED_PRICE_10,
 } from "./asserts";
 import type { SimMessage, SimRoute } from "./simulate";
 
@@ -216,6 +219,174 @@ export const sequences: Sequence[] = [
     globals: {
       noConsecutiveDuplicates: true,
     },
+  },
+
+  // ── CASO A — preço antes da foto ───────────────────────────────
+  {
+    id: "price_before_photo",
+    title: "A) Pergunta o valor antes de mandar foto → responde o preço, não fica só pedindo foto",
+    classification: "gate ausente (preço) — bug real",
+    description:
+      "Lead de anúncio pergunta o preço antes de enviar a foto. Antes: a IA respondia só 'pode mandar a foto, fico aguardando'. Agora responde o preço direto (R$10) e só depois convida a mandar a foto.",
+    initialHistory: [],
+    summary: null,
+    turns: [
+      {
+        label: "anúncio inicial — IA pede a foto (normal)",
+        batch: [
+          {
+            content:
+              "Olá, vi o anúncio sobre restauração de fotos e gostaria de restaurar uma imagem.",
+          },
+        ],
+        mockModelResponse:
+          "Claro! Pode me enviar a foto que deseja restaurar? Assim consigo te informar o valor.",
+        expect: {
+          route: "ai_response",
+          forbidden: [...ALWAYS_FORBIDDEN],
+          maxMessages: 2,
+        },
+      },
+      {
+        label: "pergunta o valor antes da foto → preço direto",
+        batch: [{ content: "Boa tarde. Gostaria de saber antes o valor" }],
+        expect: {
+          route: "price_answer",
+          required: [/r\$\s*10/i],
+          // não pode ficar só pedindo foto (uma resposta só-foto não teria R$10).
+          forbidden: [...ALWAYS_FORBIDDEN],
+          maxMessages: 2,
+        },
+      },
+    ],
+    globals: {
+      noConsecutiveDuplicates: true,
+    },
+  },
+
+  // ── CASO B — texto + imagem no mesmo burst ──────────────────────
+  {
+    id: "image_same_burst_no_reask",
+    title: "B) Texto + imagem no mesmo batch → reconhece a foto, nunca pede foto de novo",
+    classification: "batch/mídia — bug real",
+    description:
+      "Cliente manda 'Bom dia' e a imagem quase juntos. Quando texto+imagem chegam no MESMO batch, a IA não pode pedir a foto: reconhece e informa R$10. (O batching texto+imagem é garantido pelo sinal MEDIA_PENDING do bridge — testado em test:webhook-logic.)",
+    initialHistory: [],
+    summary: null,
+    turns: [
+      {
+        label: "bom dia + imagem no mesmo burst",
+        batch: [
+          { content: "Bom dia" },
+          { content: "Cliente enviou uma foto para restaurar.", type: "IMAGE" },
+        ],
+        mockModelResponse:
+          "Bom dia! Me manda a foto que você quer restaurar aqui que eu vejo pra você.",
+        expect: {
+          route: "ai_response",
+          required: [...REQUIRED_ACKNOWLEDGES_SERVICE, ...REQUIRED_PRICE_10],
+          forbidden: [...POST_PHOTO_FORBIDDEN, ...ALWAYS_FORBIDDEN],
+          maxMessages: 3,
+        },
+      },
+    ],
+  },
+
+  // ── CASO C — "?" depois da oferta ───────────────────────────────
+  {
+    id: "question_mark_after_offer",
+    title: "C) '?' depois da oferta → esclarece, não repete o bloco nem reinicia",
+    classification: "gate ausente (esclarecimento) — bug real",
+    description:
+      "Foto recebida, IA já ofertou (R$10 + Pix). Lead manda '?'. Antes: a IA repetia o bloco inteiro. Agora esclarece a oferta de forma curta e diferente. Vale também para 'como assim?'.",
+    initialHistory: [
+      "Lead: Cliente enviou uma foto para restaurar.",
+      "Lead: Tirar a pessoa do meio",
+      "Atendente: Recebi a foto. Dá pra trabalhar nela.",
+      "Atendente: Mantendo o rosto natural.",
+      "Atendente: Pra fazer essa foto fica R$10. Quer que eu te mande o Pix?",
+    ],
+    summary: "[FOTO_RECEBIDA]",
+    turns: [
+      {
+        label: "lead manda só '?'",
+        batch: [{ content: "?" }],
+        expect: {
+          route: "offer_clarification",
+          required: [/r\$\s*10|pix/i],
+          forbidden: [
+            /pra fazer essa foto fica r\$10\. quer que eu te mande o pix\?/i,
+            ...POST_PHOTO_FORBIDDEN,
+            ...ALWAYS_FORBIDDEN,
+          ],
+          maxMessages: 2,
+        },
+      },
+      {
+        label: "lead insiste 'como assim?'",
+        batch: [{ content: "como assim?" }],
+        expect: {
+          route: "offer_clarification",
+          required: [/r\$\s*10|pix|comprovante/i],
+          forbidden: [...POST_PHOTO_FORBIDDEN, ...ALWAYS_FORBIDDEN],
+          maxMessages: 2,
+        },
+      },
+    ],
+  },
+
+  // ── CASO D — Pix depois da foto ─────────────────────────────────
+  {
+    id: "pix_after_photo_no_reask",
+    title: "D) Depois do Pix, com foto já recebida → pede comprovante, nunca a foto",
+    classification: "estado persistente de foto — bug real",
+    description:
+      "Pix já enviado e foto já recebida. Mesmo que o modelo tente pedir a foto de novo, a resposta não pode pedir foto: pede o comprovante e mantém o contexto.",
+    initialHistory: [
+      "Lead: Cliente enviou uma foto para restaurar.",
+      "Atendente: Pra fazer essa foto fica R$10. Quer que eu te mande o Pix?",
+      "Lead: Sim",
+      "Atendente: Perfeito. O Pix é:",
+      "Atendente: estudiofotos000@gmail.com",
+      "Atendente: Nome: Lucas Agostini — Nubank",
+    ],
+    summary: "[FOTO_RECEBIDA]\n[PAGAMENTO: WAITING_PAYMENT_RECEIPT]",
+    turns: [
+      {
+        label: "lead pergunta 'e agora?' e o modelo tenta repedir a foto",
+        batch: [{ content: "E agora?" }],
+        mockModelResponse: "Beleza! Me manda a foto aqui que eu vejo pra você.",
+        expect: {
+          route: "ai_response",
+          required: [/comprovante/i],
+          forbidden: [...POST_PHOTO_FORBIDDEN, ...POST_PIX_FORBIDDEN],
+          maxMessages: 3,
+        },
+      },
+    ],
+  },
+
+  // ── CASO E — áudio sem transcrição ──────────────────────────────
+  {
+    id: "audio_without_transcription_seq",
+    title: "E) Áudio sem transcrição → pede confirmação por escrito, não inventa",
+    classification: "mídia (áudio)",
+    description:
+      "Cliente manda só um áudio. A IA não pode fingir que entendeu: pede confirmação por escrito.",
+    initialHistory: ["Lead: Oi"],
+    summary: null,
+    turns: [
+      {
+        label: "áudio sem transcrição",
+        batch: [{ content: "Cliente enviou um áudio.", type: "AUDIO" }],
+        expect: {
+          route: "audio_clarification",
+          required: [/[aá]udio/i, /por escrito|confirma/i],
+          forbidden: [...POST_PHOTO_FORBIDDEN, ...ALWAYS_FORBIDDEN],
+          maxMessages: 1,
+        },
+      },
+    ],
   },
 
   {

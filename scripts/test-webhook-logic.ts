@@ -21,8 +21,11 @@ import {
   shouldTransferToHuman,
   buildAiIncomingText,
   buildAiIncomingTextFromBatch,
+  isMediaPendingActive,
   receiptDecisionFromAnalysis,
   dedupeBatchParts,
+  shouldWaitForIncomingMedia,
+  MEDIA_PENDING_TTL_MS,
   type PendingInboundMessage,
 } from "../lib/webhook-helpers";
 import {
@@ -582,6 +585,119 @@ test("CENÁRIO: lead pede transferência para humano → gate ativa", () => {
   const parsed = extractIncomingPayload(payload);
   assert.notEqual(parsed, null);
   assert.equal(shouldTransferToHuman(parsed!.text), true);
+});
+
+// ─────────────────────────────────────────────────────────────────
+// 8. Caso B — batching de texto + imagem (MEDIA_PENDING)
+// ─────────────────────────────────────────────────────────────────
+console.log("\n▶ Caso B — janela de mídia (MEDIA_PENDING)");
+
+test("isMediaPendingActive: sem sinal → false", () => {
+  assert.equal(isMediaPendingActive(null), false);
+  assert.equal(isMediaPendingActive(undefined), false);
+});
+
+test("isMediaPendingActive: sinal recente → true", () => {
+  const now = 1_000_000;
+  assert.equal(isMediaPendingActive(new Date(now - 2000), now), true);
+});
+
+test("isMediaPendingActive: sinal expirado (> TTL) → false", () => {
+  const now = 1_000_000;
+  assert.equal(isMediaPendingActive(new Date(now - MEDIA_PENDING_TTL_MS - 1), now), false);
+});
+
+test("shouldWaitForIncomingMedia: mídia a caminho e batch ainda sem mídia → ESPERA", () => {
+  const now = 1_000_000;
+  assert.equal(
+    shouldWaitForIncomingMedia({
+      pendingMediaAt: new Date(now - 1000),
+      batchHasMedia: false,
+      elapsedSinceFirstMs: 2000,
+      maxBatchWaitMs: 12000,
+      now,
+    }),
+    true,
+    "texto deve segurar a janela até a imagem do mesmo burst entrar no batch",
+  );
+});
+
+test("shouldWaitForIncomingMedia: imagem já chegou (batchHasMedia) → NÃO espera", () => {
+  const now = 1_000_000;
+  assert.equal(
+    shouldWaitForIncomingMedia({
+      pendingMediaAt: new Date(now - 1000),
+      batchHasMedia: true,
+      elapsedSinceFirstMs: 2000,
+      maxBatchWaitMs: 12000,
+      now,
+    }),
+    false,
+  );
+});
+
+test("shouldWaitForIncomingMedia: teto de espera estourado → NÃO espera (responde o que houver)", () => {
+  const now = 1_000_000;
+  assert.equal(
+    shouldWaitForIncomingMedia({
+      pendingMediaAt: new Date(now - 1000),
+      batchHasMedia: false,
+      elapsedSinceFirstMs: 12001,
+      maxBatchWaitMs: 12000,
+      now,
+    }),
+    false,
+  );
+});
+
+test("shouldWaitForIncomingMedia: sem sinal de mídia → NÃO espera", () => {
+  assert.equal(
+    shouldWaitForIncomingMedia({
+      pendingMediaAt: null,
+      batchHasMedia: false,
+      elapsedSinceFirstMs: 1000,
+      maxBatchWaitMs: 12000,
+    }),
+    false,
+  );
+});
+
+// ─────────────────────────────────────────────────────────────────
+// 9. Caso F — mensagens de sistema da Meta não entram no histórico
+// ─────────────────────────────────────────────────────────────────
+console.log("\n▶ Caso F — mensagens de sistema da Meta");
+
+test("protocolMessage (criptografia/efêmera) → ignorada (null)", () => {
+  const result = extractIncomingPayload({
+    data: {
+      key: { remoteJid: "5519999111111@s.whatsapp.net", fromMe: false, id: "sys1" },
+      message: { protocolMessage: { type: "EPHEMERAL_SETTING" } },
+      phone: "5519999111111",
+    },
+  });
+  assert.equal(result, null, "mensagem de sistema não pode virar mensagem do lead");
+});
+
+test("senderKeyDistributionMessage → ignorada (null)", () => {
+  const result = extractIncomingPayload({
+    data: {
+      key: { remoteJid: "5519999111111@s.whatsapp.net", fromMe: false, id: "sys2" },
+      message: { senderKeyDistributionMessage: { groupId: "x" } },
+      phone: "5519999111111",
+    },
+  });
+  assert.equal(result, null);
+});
+
+test("aviso de criptografia ponta-a-ponta (sem conteúdo) → ignorado (null)", () => {
+  const result = extractIncomingPayload({
+    data: {
+      key: { remoteJid: "5519999111111@s.whatsapp.net", fromMe: false, id: "sys3" },
+      message: {},
+      phone: "5519999111111",
+    },
+  });
+  assert.equal(result, null);
 });
 
 // ─────────────────────────────────────────────────────────────────
