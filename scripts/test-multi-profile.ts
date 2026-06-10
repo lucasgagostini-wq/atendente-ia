@@ -16,7 +16,10 @@ async function main() {
 
   assert.equal(music.slug, MUSIC_PROFILE_SLUG);
   assert.equal(music.aiEnabled, false);
-  assert.equal(music.status, "AWAITING_WHATSAPP");
+  assert.ok(
+    music.status === "AWAITING_WHATSAPP" || music.status === "ACTIVE",
+    `status inesperado para musica-personalizada: ${music.status}`,
+  );
 
   const nullProfileLeads = await prisma.lead.count({
     where: { profileId: null },

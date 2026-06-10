@@ -570,6 +570,7 @@ export async function POST(request: Request) {
         { source: "whatsapp" },
         profile.id,
       );
+      await leadService.ensureDefaultOfferTagForProfile(lead.id, profile.slug);
       await prisma.lead
         .update({ where: { id: lead.id }, data: { pendingMediaAt: new Date() } })
         .catch(() => {});
@@ -601,6 +602,7 @@ export async function POST(request: Request) {
       const lead = await leadService.upsertByPhone(outgoing.phone, {
         source: "whatsapp",
       }, activeProfile.id);
+      await leadService.ensureDefaultOfferTagForProfile(lead.id, activeProfile.slug);
       const conversation = await conversationService.getOrCreateOpenConversation(lead.id);
 
       await conversationService.saveMessage({
@@ -664,6 +666,7 @@ export async function POST(request: Request) {
         name: incoming.senderName,
         source: "whatsapp",
       }, activeProfile.id);
+      await leadService.ensureDefaultOfferTagForProfile(lead.id, activeProfile.slug);
 
     // ── Criar/buscar conversa ────────────────────────────────
     const conversation = await conversationService.getOrCreateOpenConversation(lead.id);

@@ -1,8 +1,13 @@
 import { FunnelStage, LeadStatus, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
+import { MUSIC_PROFILE_SLUG } from "@/lib/profile-defaults";
 
 const LEADS_DEFAULT_LIMIT = 500;
 const LEADS_MAX_LIMIT = 2000;
+const MUSIC_OFFER_TAG = {
+  name: "Música Personalizada",
+  color: "#F59E0B",
+} as const;
 
 type LeadFilters = {
   profileId?: string;
@@ -32,6 +37,14 @@ type BulkLeadActionInput = {
 };
 
 class LeadService {
+  async ensureTag(data: { name: string; color: string }) {
+    return prisma.tag.upsert({
+      where: { name: data.name },
+      create: data,
+      update: { color: data.color },
+    });
+  }
+
   async getLeads(filters: LeadFilters = {}) {
     const where: Prisma.LeadWhereInput = {};
 
@@ -82,11 +95,33 @@ class LeadService {
   }
 
   async createTag(data: { name: string; color: string }) {
-    return prisma.tag.upsert({
-      where: { name: data.name },
-      create: data,
-      update: { color: data.color },
+    return this.ensureTag(data);
+  }
+
+  async attachTagToLead(leadId: string, tagId: string) {
+    return prisma.leadTag.upsert({
+      where: {
+        leadId_tagId: {
+          leadId,
+          tagId,
+        },
+      },
+      create: {
+        leadId,
+        tagId,
+      },
+      update: {},
     });
+  }
+
+  async ensureDefaultOfferTagForProfile(leadId: string, profileSlug?: string | null) {
+    if (profileSlug !== MUSIC_PROFILE_SLUG) {
+      return null;
+    }
+
+    const tag = await this.ensureTag(MUSIC_OFFER_TAG);
+    await this.attachTagToLead(leadId, tag.id);
+    return tag;
   }
 
   async getLeadById(id: string, profileId?: string) {
