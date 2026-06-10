@@ -1,6 +1,8 @@
 export const DEFAULT_PROFILE_SLUG = "restauracao-fotos";
 export const MUSIC_PROFILE_SLUG = "musica-personalizada";
 export const ACTIVE_PROFILE_COOKIE = "active-profile";
+export const MIGRATED_WHATSAPP_NUMBER = "558195990613";
+export const MUSIC_SESSION_NAME = "musica-personalizada-558195990613";
 
 export const RESTORATION_PIX = {
   key: "estudiofotos000@gmail.com",
@@ -18,8 +20,8 @@ export const PROFILE_DEFAULTS = {
     pixKey: RESTORATION_PIX.key,
     pixName: RESTORATION_PIX.name,
     pixBank: RESTORATION_PIX.bank,
-    whatsappNumber: "558195990613",
-    whatsappSessionName: "atendente-ia",
+    whatsappNumber: null,
+    whatsappSessionName: null,
   },
   music: {
     name: "Música Personalizada",
@@ -30,6 +32,8 @@ export const PROFILE_DEFAULTS = {
     pixKey: null,
     pixName: null,
     pixBank: null,
+    whatsappNumber: MIGRATED_WHATSAPP_NUMBER,
+    whatsappSessionName: MUSIC_SESSION_NAME,
   },
 } as const;
 

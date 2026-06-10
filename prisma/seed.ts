@@ -51,7 +51,8 @@ async function main() {
       pixKey: PROFILE_DEFAULTS.restoration.pixKey,
       pixName: PROFILE_DEFAULTS.restoration.pixName,
       pixBank: PROFILE_DEFAULTS.restoration.pixBank,
-      whatsappSessionName: process.env.EVOLUTION_INSTANCE_NAME ?? undefined,
+      whatsappNumber: PROFILE_DEFAULTS.restoration.whatsappNumber ?? undefined,
+      whatsappSessionName: PROFILE_DEFAULTS.restoration.whatsappSessionName ?? undefined,
     },
     create: {
       name: PROFILE_DEFAULTS.restoration.name,
@@ -62,7 +63,8 @@ async function main() {
       pixKey: PROFILE_DEFAULTS.restoration.pixKey,
       pixName: PROFILE_DEFAULTS.restoration.pixName,
       pixBank: PROFILE_DEFAULTS.restoration.pixBank,
-      whatsappSessionName: process.env.EVOLUTION_INSTANCE_NAME ?? undefined,
+      whatsappNumber: PROFILE_DEFAULTS.restoration.whatsappNumber ?? undefined,
+      whatsappSessionName: PROFILE_DEFAULTS.restoration.whatsappSessionName ?? undefined,
     },
   });
 
@@ -73,6 +75,8 @@ async function main() {
       description: PROFILE_DEFAULTS.music.description,
       status: PROFILE_DEFAULTS.music.status,
       aiEnabled: PROFILE_DEFAULTS.music.aiEnabled,
+      whatsappNumber: PROFILE_DEFAULTS.music.whatsappNumber ?? undefined,
+      whatsappSessionName: PROFILE_DEFAULTS.music.whatsappSessionName ?? undefined,
     },
     create: {
       name: PROFILE_DEFAULTS.music.name,
@@ -80,6 +84,8 @@ async function main() {
       description: PROFILE_DEFAULTS.music.description,
       status: PROFILE_DEFAULTS.music.status,
       aiEnabled: PROFILE_DEFAULTS.music.aiEnabled,
+      whatsappNumber: PROFILE_DEFAULTS.music.whatsappNumber ?? undefined,
+      whatsappSessionName: PROFILE_DEFAULTS.music.whatsappSessionName ?? undefined,
     },
   });
 

@@ -72,10 +72,6 @@ class ProfileService {
         pixKey: PROFILE_DEFAULTS.restoration.pixKey,
         pixName: PROFILE_DEFAULTS.restoration.pixName,
         pixBank: PROFILE_DEFAULTS.restoration.pixBank,
-        whatsappNumber: PROFILE_DEFAULTS.restoration.whatsappNumber,
-        whatsappSessionName:
-          normalize(settings.evolutionInstanceName) ??
-          PROFILE_DEFAULTS.restoration.whatsappSessionName,
       },
       create: {
         name: PROFILE_DEFAULTS.restoration.name,
@@ -99,7 +95,6 @@ class ProfileService {
         name: PROFILE_DEFAULTS.music.name,
         description: PROFILE_DEFAULTS.music.description,
         promptConfig: musicPromptConfig(),
-        whatsappSessionName: "musica-personalizada",
       },
       create: {
         name: PROFILE_DEFAULTS.music.name,
@@ -108,7 +103,8 @@ class ProfileService {
         status: PROFILE_DEFAULTS.music.status,
         aiEnabled: false,
         promptConfig: musicPromptConfig(),
-        whatsappSessionName: "musica-personalizada",
+        whatsappNumber: PROFILE_DEFAULTS.music.whatsappNumber,
+        whatsappSessionName: PROFILE_DEFAULTS.music.whatsappSessionName,
       },
     });
 
