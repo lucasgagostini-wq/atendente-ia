@@ -72,8 +72,10 @@ class ProfileService {
         pixKey: PROFILE_DEFAULTS.restoration.pixKey,
         pixName: PROFILE_DEFAULTS.restoration.pixName,
         pixBank: PROFILE_DEFAULTS.restoration.pixBank,
+        whatsappNumber: PROFILE_DEFAULTS.restoration.whatsappNumber,
         whatsappSessionName:
-          normalize(settings.evolutionInstanceName) ?? undefined,
+          normalize(settings.evolutionInstanceName) ??
+          PROFILE_DEFAULTS.restoration.whatsappSessionName,
       },
       create: {
         name: PROFILE_DEFAULTS.restoration.name,
@@ -84,8 +86,10 @@ class ProfileService {
         pixKey: PROFILE_DEFAULTS.restoration.pixKey,
         pixName: PROFILE_DEFAULTS.restoration.pixName,
         pixBank: PROFILE_DEFAULTS.restoration.pixBank,
+        whatsappNumber: PROFILE_DEFAULTS.restoration.whatsappNumber,
         whatsappSessionName:
-          normalize(settings.evolutionInstanceName) ?? undefined,
+          normalize(settings.evolutionInstanceName) ??
+          PROFILE_DEFAULTS.restoration.whatsappSessionName,
       },
     });
 

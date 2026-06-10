@@ -18,6 +18,8 @@ export const PROFILE_DEFAULTS = {
     pixKey: RESTORATION_PIX.key,
     pixName: RESTORATION_PIX.name,
     pixBank: RESTORATION_PIX.bank,
+    whatsappNumber: "558195990613",
+    whatsappSessionName: "atendente-ia",
   },
   music: {
     name: "Música Personalizada",

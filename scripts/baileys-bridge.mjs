@@ -32,6 +32,14 @@ const profileSlug =
   process.env.PROFILE_SLUG ||
   "restauracao-fotos";
 
+// Pairing code mode: em vez de QR Code, gera código de 8 dígitos para parear pelo número.
+// Defina WHATSAPP_PAIRING_CODE=true e WHATSAPP_PAIRING_PHONE=<número sem + ou espaços>.
+// O bridge detecta automaticamente se o número salvo na sessão mudou e limpa a sessão.
+const pairingPhone = process.env.WHATSAPP_PAIRING_PHONE
+  ? normalizePhone(process.env.WHATSAPP_PAIRING_PHONE)
+  : null;
+const usePairingCode = process.env.WHATSAPP_PAIRING_CODE === "true" && Boolean(pairingPhone);
+
 let webhookUrl = process.env.BAILEYS_BRIDGE_WEBHOOK_URL || "";
 
 // Segredo compartilhado opcional para autenticar o bridge no webhook.
@@ -255,6 +263,22 @@ function waitForPairingReady(timeoutMs = 30_000) {
 
     pairingReadyWaiters.push({ resolve, reject, timeout });
   });
+}
+
+/**
+ * Lê o número de telefone registrado na sessão Baileys salva em disco.
+ * Retorna null se não houver sessão ou se o campo me.id não estiver disponível.
+ */
+function getRegisteredPhone() {
+  try {
+    const creds = readJsonFile(path.join(authDir, "creds.json"));
+    if (!creds?.me?.id) return null;
+    // JID format: "558195990613:21@s.whatsapp.net" or "558195990613@s.whatsapp.net"
+    const raw = String(creds.me.id).split(":")[0].split("@")[0];
+    return normalizePhone(raw) || null;
+  } catch {
+    return null;
+  }
 }
 
 async function stopSocket(reason = "manual stop") {
@@ -998,6 +1022,7 @@ app.post("/chat/sendPresence/:instance", async (req, res) => {
 app.listen(port, async () => {
   console.log(`[baileys-bridge] listening on port ${port}`);
   console.log(`[baileys-bridge] instance: ${instanceName}`);
+  console.log(`[baileys-bridge] profileSlug: ${profileSlug}`);
   if (apiKey === "change-me") {
     console.log(
       "[baileys-bridge] warning: BAILEYS_BRIDGE_API_KEY is using default value.",
@@ -1007,7 +1032,62 @@ app.listen(port, async () => {
     console.log(`[baileys-bridge] webhook: ${webhookUrl}`);
   }
 
-  if (autoStart) {
+  if (usePairingCode) {
+    // ── Modo pairing code ─────────────────────────────────────────────────────
+    // Detecta automaticamente se o número salvo na sessão mudou.
+    // Se mudou (ou não há sessão), limpa os arquivos e pede novo código.
+    // Se já está pareado com o número correto, reconecta normalmente.
+    try {
+      const registeredPhone = getRegisteredPhone();
+      const alreadyCorrect =
+        Boolean(registeredPhone) && registeredPhone === pairingPhone;
+
+      if (!alreadyCorrect) {
+        if (registeredPhone) {
+          console.log(
+            `[bridge] Sessão atual: ${registeredPhone} → novo número: ${pairingPhone}. Limpando sessão anterior...`,
+          );
+        } else {
+          console.log(
+            `[bridge] Nenhuma sessão encontrada. Iniciando pareamento para ${pairingPhone}...`,
+          );
+        }
+        resetAuthFiles();
+      } else {
+        console.log(
+          `[bridge] Sessão existente para ${pairingPhone}. Reconectando normalmente...`,
+        );
+      }
+
+      await startSocket({ qr: false, forceRestart: false });
+
+      if (alreadyCorrect && socket?.authState?.creds?.registered) {
+        // Já registrado com o número correto — socket vai conectar sozinho
+        console.log(`[bridge] Já registrado como ${pairingPhone}. Aguardando conexão...`);
+      } else {
+        // Sessão nova ou número diferente — solicita código de pareamento
+        console.log("[bridge] Aguardando canal de pareamento (QR interno)...");
+        await waitForPairingReady(60_000);
+        const code = await socket.requestPairingCode(pairingPhone);
+
+        const sep = "═".repeat(54);
+        console.log(`\n${sep}`);
+        console.log(`  CÓDIGO DE PAREAMENTO: ${code}`);
+        console.log(sep);
+        console.log(`  Número: +${pairingPhone}`);
+        console.log(`  1. Abra o WhatsApp no celular`);
+        console.log(`  2. Aparelhos conectados → Conectar aparelho`);
+        console.log(`  3. Conectar com número de telefone`);
+        console.log(`  4. Digite o código: ${code}`);
+        console.log(`${sep}\n`);
+      }
+    } catch (error) {
+      lastError =
+        error instanceof Error ? { message: error.message } : { message: "pairing startup failed" };
+      console.error("[bridge] Erro no startup de pairing code:", error);
+    }
+  } else if (autoStart) {
+    // ── Modo normal (QR ou sessão existente) ──────────────────────────────────
     try {
       await startSocket();
     } catch (error) {

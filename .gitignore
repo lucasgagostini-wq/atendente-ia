@@ -30,6 +30,7 @@ yarn-error.log*
 .env
 .env*.local
 .env.musica
+.env.restauracao
 .env.vercel.production
 
 # local bridge runtime
