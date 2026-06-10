@@ -281,6 +281,31 @@ function getRegisteredPhone() {
   }
 }
 
+// Sentinela de pareamento concluído. Só é gravado quando a conexão realmente
+// ABRE com sucesso (connection === "open"). Isso distingue uma sessão funcional
+// de uma sessão "registrada pela metade" — quando o código de pareamento foi
+// solicitado mas o usuário nunca digitou no celular, o creds.json fica com o
+// número salvo porém a conexão falha em loop. Sem essa sentinela, o bridge
+// reconectaria eternamente uma sessão quebrada em vez de pedir novo código.
+const PAIRED_SENTINEL = "paired-ok.json";
+
+function markPairedOk(phone) {
+  try {
+    if (!fs.existsSync(authDir)) fs.mkdirSync(authDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(authDir, PAIRED_SENTINEL),
+      JSON.stringify({ phone: normalizePhone(phone), pairedAt: Date.now() }),
+    );
+  } catch {
+    // noop
+  }
+}
+
+function getPairedOkPhone() {
+  const data = readJsonFile(path.join(authDir, PAIRED_SENTINEL));
+  return data?.phone ? normalizePhone(data.phone) : null;
+}
+
 async function stopSocket(reason = "manual stop") {
   manualStop = true;
   pairingReadyAt = 0;
@@ -552,6 +577,14 @@ async function startSocket(options = {}) {
         ownerJid = sock.user?.id || null;
         lastError = null;
         lastQrDataUrl = null;
+        // Marca que o pareamento foi de fato concluído com sucesso para este número.
+        // O JID vem com sufixo de dispositivo (ex.: "558195990613:2@s.whatsapp.net");
+        // removemos ":<device>" e "@server" antes de normalizar para não gravar
+        // dígitos extras na sentinela.
+        const rawId = String(sock.user?.id || "");
+        const connectedPhone =
+          normalizePhone(rawId.split(":")[0].split("@")[0]) || getRegisteredPhone();
+        if (connectedPhone) markPairedOk(connectedPhone);
       }
 
       if (connection === "close") {
@@ -1038,14 +1071,23 @@ app.listen(port, async () => {
     // Se mudou (ou não há sessão), limpa os arquivos e pede novo código.
     // Se já está pareado com o número correto, reconecta normalmente.
     try {
+      // Só consideramos "já pareado" se a conexão abriu com sucesso alguma vez
+      // (sentinela paired-ok.json) E o número bate. Uma sessão apenas "registrada"
+      // no creds.json (pareamento solicitado mas nunca concluído no celular) NÃO
+      // conta — nesse caso limpamos e pedimos um código novo.
+      const pairedOkPhone = getPairedOkPhone();
       const registeredPhone = getRegisteredPhone();
       const alreadyCorrect =
-        Boolean(registeredPhone) && registeredPhone === pairingPhone;
+        Boolean(pairedOkPhone) && pairedOkPhone === pairingPhone;
 
       if (!alreadyCorrect) {
-        if (registeredPhone) {
+        if (registeredPhone && registeredPhone !== pairingPhone) {
           console.log(
             `[bridge] Sessão atual: ${registeredPhone} → novo número: ${pairingPhone}. Limpando sessão anterior...`,
+          );
+        } else if (registeredPhone) {
+          console.log(
+            `[bridge] Sessão de ${registeredPhone} não concluiu pareamento. Limpando e pedindo novo código...`,
           );
         } else {
           console.log(

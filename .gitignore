@@ -53,6 +53,9 @@ next-env.d.ts
 logs-iniciar.txt
 qr-whatsapp.png
 .codex-admin-console-dev*.log
+bridge-pairing.log
+bridge-pairing-err.log
+bridge.pid
 
 # Playwright
 tests/e2e/.auth/
