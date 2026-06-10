@@ -471,7 +471,7 @@ export default function ConversasPage() {
           {filteredConversations.map((conv) => {
             const active = conv.id === selectedConversationId;
             const latest = getLatestMessage(conv.messages);
-            const name = conv.lead?.name || "Lead sem nome";
+            const name = conv.lead?.name || formatPhone(conv.lead?.phone || "") || "Lead sem nome";
             const stage = conv.lead?.funnelStage ?? "COLD";
             const isOpen = conv.status === "OPEN";
             // Mostra não-lida sempre que a última mensagem (inbound OU outbound
@@ -583,7 +583,7 @@ export default function ConversasPage() {
                 </div>
                 <div>
                   <div className="flex items-center gap-2">
-                    <p className="text-sm font-semibold text-zinc-100">{lead?.name || "Lead sem nome"}</p>
+                    <p className="text-sm font-semibold text-zinc-100">{lead?.name || formatPhone(lead?.phone || "") || "Lead sem nome"}</p>
                     {lead?.funnelStage && (
                       <Badge variant={stageVariantMap[lead.funnelStage]}>
                         {stageLabelMap[lead.funnelStage]}

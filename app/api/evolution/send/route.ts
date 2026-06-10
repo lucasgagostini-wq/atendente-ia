@@ -30,7 +30,12 @@ export async function POST(request: Request) {
       );
     }
 
-    const lead = await leadService.upsertByPhone(parsed.data.phone, undefined, activeProfile.id);
+    const lead = await leadService.upsertByPhone(
+      parsed.data.phone,
+      undefined,
+      activeProfile.id,
+      { profileSlug: activeProfile.slug },
+    );
     const conversation = await conversationService.getOrCreateOpenConversation(
       lead.id,
     );

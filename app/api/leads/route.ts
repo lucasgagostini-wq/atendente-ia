@@ -1,5 +1,6 @@
 import { FunnelStage, LeadStatus } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
+import { getOperationalDefaultsForProfile, resolveLeadName } from "@/lib/lead-profile";
 import { leadSchema } from "@/lib/validations";
 import { getProfileSlugFromRequest } from "@/lib/profile-context";
 import { leadService } from "@/services/lead.service";
@@ -43,6 +44,7 @@ export async function POST(request: Request) {
     const activeProfile = await profileService.getProfileBySlug(
       getProfileSlugFromRequest(request),
     );
+    const profileDefaults = getOperationalDefaultsForProfile(activeProfile.slug);
     const body = await request.json();
     const parsed = leadSchema.safeParse(body);
 
@@ -55,13 +57,13 @@ export async function POST(request: Request) {
 
     const lead = await leadService.createLead({
       profile: { connect: { id: activeProfile.id } },
-      name: parsed.data.name || null,
+      name: resolveLeadName([parsed.data.name], parsed.data.phone),
       phone: parsed.data.phone.replace(/\D/g, ""),
       source: toNullable(parsed.data.source),
-      status: parsed.data.status ?? "NEW",
-      funnelStage: parsed.data.funnelStage ?? "COLD",
-      aiEnabled: parsed.data.aiEnabled ?? true,
-      humanTakeover: parsed.data.humanTakeover ?? false,
+      status: parsed.data.status ?? profileDefaults.status ?? "NEW",
+      funnelStage: parsed.data.funnelStage ?? profileDefaults.funnelStage ?? "COLD",
+      aiEnabled: parsed.data.aiEnabled ?? profileDefaults.aiEnabled ?? true,
+      humanTakeover: parsed.data.humanTakeover ?? profileDefaults.humanTakeover ?? false,
       summary: toNullable(parsed.data.summary),
       interest: toNullable(parsed.data.interest),
       leadTags:

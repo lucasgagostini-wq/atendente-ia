@@ -9,6 +9,10 @@ import { promptService } from "@/services/prompt.service";
 
 async function main() {
   const { restoration, music } = await profileService.ensureDefaultProfiles(true);
+  const now = Date.now();
+  const musicPhone = `55119123${String(now).slice(-4)}`;
+  const restorationPhone = `55118123${String(now).slice(-4)}`;
+  const cleanupLeadIds: string[] = [];
 
   assert.equal(restoration.slug, DEFAULT_PROFILE_SLUG);
   assert.equal(restoration.aiEnabled, false);
@@ -56,6 +60,74 @@ async function main() {
     buildProfileHref("/dashboard?foo=1", MUSIC_PROFILE_SLUG),
     "/dashboard?foo=1&profile=musica-personalizada",
   );
+
+  try {
+    const musicLead = await leadService.upsertByPhone(
+      musicPhone,
+      { name: "Cliente Teste Musica", source: "webhook_test" },
+      music.id,
+      { profileSlug: music.slug },
+    );
+    cleanupLeadIds.push(musicLead.id);
+    await leadService.ensureDefaultOfferTagForProfile(musicLead.id, music.slug);
+    const musicConversation = await conversationService.getOrCreateOpenConversation(musicLead.id);
+    await conversationService.saveMessage({
+      conversationId: musicConversation.id,
+      leadId: musicLead.id,
+      direction: "INBOUND",
+      role: "LEAD",
+      type: "TEXT",
+      content: "Teste de última interação música",
+    });
+
+    const restoredMusicLead = await leadService.getLeadById(musicLead.id, music.id);
+    assert.equal(restoredMusicLead?.funnelStage, "CUSTOMER");
+    assert.equal(restoredMusicLead?.status, "CONVERTED");
+    assert.equal(restoredMusicLead?.name, "Cliente Teste Musica");
+    assert.equal(restoredMusicLead?.lastMessage, "Teste de última interação música");
+    assert.ok(restoredMusicLead?.lastMessageAt, "lead de música deve ter última interação");
+    assert.ok(
+      restoredMusicLead?.leadTags.some((item) => item.tag.name === "Música Personalizada"),
+      "lead de música deve receber tag automática",
+    );
+
+    const fallbackMusicLead = await leadService.upsertByPhone(
+      `55117123${String(now).slice(-4)}`,
+      { source: "webhook_test" },
+      music.id,
+      { profileSlug: music.slug },
+    );
+    cleanupLeadIds.push(fallbackMusicLead.id);
+    assert.notEqual(fallbackMusicLead.name, null);
+    assert.notEqual(fallbackMusicLead.name, "");
+
+    const restorationLead = await leadService.upsertByPhone(
+      restorationPhone,
+      { source: "webhook_test" },
+      restoration.id,
+      { profileSlug: restoration.slug },
+    );
+    cleanupLeadIds.push(restorationLead.id);
+    await leadService.ensureDefaultOfferTagForProfile(restorationLead.id, restoration.slug);
+    const restoredRestorationLead = await leadService.getLeadById(restorationLead.id, restoration.id);
+    assert.equal(restoredRestorationLead?.funnelStage, "COLD");
+    assert.equal(restoredRestorationLead?.status, "NEW");
+    assert.equal(
+      restoredRestorationLead?.leadTags.some((item) => item.tag.name === "Música Personalizada"),
+      false,
+      "restauração não deve receber tag da música",
+    );
+  } finally {
+    if (cleanupLeadIds.length > 0) {
+      await prisma.lead.deleteMany({
+        where: {
+          id: {
+            in: cleanupLeadIds,
+          },
+        },
+      });
+    }
+  }
 
   console.log("Multi-profile checks OK");
 }

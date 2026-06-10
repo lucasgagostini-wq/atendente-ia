@@ -1,13 +1,14 @@
 import { FunnelStage, LeadStatus, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { MUSIC_PROFILE_SLUG } from "@/lib/profile-defaults";
+import {
+  MUSIC_OFFER_TAG,
+  getOperationalDefaultsForProfile,
+  isMusicProfileSlug,
+  resolveLeadName,
+} from "@/lib/lead-profile";
 
 const LEADS_DEFAULT_LIMIT = 500;
 const LEADS_MAX_LIMIT = 2000;
-const MUSIC_OFFER_TAG = {
-  name: "Música Personalizada",
-  color: "#F59E0B",
-} as const;
 
 type LeadFilters = {
   profileId?: string;
@@ -115,7 +116,7 @@ class LeadService {
   }
 
   async ensureDefaultOfferTagForProfile(leadId: string, profileSlug?: string | null) {
-    if (profileSlug !== MUSIC_PROFILE_SLUG) {
+    if (!isMusicProfileSlug(profileSlug)) {
       return null;
     }
 
@@ -145,11 +146,18 @@ class LeadService {
     phone: string,
     payload?: Partial<Prisma.LeadCreateInput>,
     profileId?: string,
+    options?: { profileSlug?: string | null },
   ) {
     const cleanPhone = phone.replace(/\D/g, "");
     if (!profileId) {
       throw new Error("profileId é obrigatório para upsert do lead");
     }
+
+    const profileDefaults = getOperationalDefaultsForProfile(options?.profileSlug);
+    const preferredName =
+      payload?.name !== undefined && payload?.name !== null
+        ? resolveLeadName([payload.name], cleanPhone)
+        : null;
 
     return prisma.lead.upsert({
       where: {
@@ -161,12 +169,16 @@ class LeadService {
       create: {
         profileId,
         phone: cleanPhone,
-        name: payload?.name,
+        name: resolveLeadName([payload?.name], cleanPhone),
         source: payload?.source ?? "whatsapp",
         summary: payload?.summary,
+        status: profileDefaults.status,
+        funnelStage: profileDefaults.funnelStage,
+        aiEnabled: profileDefaults.aiEnabled,
+        humanTakeover: profileDefaults.humanTakeover,
       },
       update: {
-        name: payload?.name ?? undefined,
+        name: preferredName ?? undefined,
         source: payload?.source ?? undefined,
       },
     });

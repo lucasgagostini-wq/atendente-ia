@@ -29,6 +29,7 @@
     "test:webhook-logic": "tsx scripts/test-webhook-logic.ts",
     "test:profiles": "tsx scripts/test-multi-profile.ts",
     "crm:import-musica-leads": "tsx scripts/import-musica-leads.ts",
+    "crm:backfill-musica": "tsx scripts/backfill-musica-crm.ts",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:public": "playwright test --project=smoke-public",

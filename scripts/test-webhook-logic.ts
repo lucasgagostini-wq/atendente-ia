@@ -16,6 +16,11 @@
 
 import assert from "node:assert/strict";
 import {
+  formatLeadPhoneFallback,
+  getOperationalDefaultsForProfile,
+  resolveLeadName,
+} from "../lib/lead-profile";
+import {
   extractIncomingPayload,
   extractOutgoingPayload,
   shouldTransferToHuman,
@@ -113,6 +118,24 @@ test("parseia mensagem de texto simples (formato Baileys bridge)", () => {
   assert.equal(result!.messageId, "msg001");
   assert.equal(result!.replyTransport, "baileys_bridge");
   assert.equal(result!.profileSlug, "restauracao-fotos");
+});
+
+test("prioriza nome do contato disponível no payload", () => {
+  const result = extractIncomingPayload({
+    data: {
+      profileSlug: "musica-personalizada",
+      key: { remoteJid: "5519999111111@s.whatsapp.net", fromMe: false, id: "msg002" },
+      message: { conversation: "oi" },
+      phone: "5519999111111",
+      contact: {
+        name: "Cliente Agenda",
+        verifiedName: "Cliente Verificado",
+      },
+      pushName: "Cliente Push",
+    },
+  });
+  assert.notEqual(result, null);
+  assert.equal(result!.senderName, "Cliente Agenda");
 });
 
 test("parseia imageMessage sem caption como 'foto para restaurar'", () => {
@@ -225,6 +248,19 @@ test("extrai mediaBase64 do campo media.mediaBase64", () => {
   });
   assert.notEqual(result, null);
   assert.equal(result!.imageUrlOrBase64, "base64data==");
+});
+
+test("salva fallback de senderName a partir do pushName", () => {
+  const result = extractIncomingPayload({
+    data: {
+      key: { remoteJid: "5519999111111@s.whatsapp.net", fromMe: false, id: "m2" },
+      message: { conversation: "oi" },
+      phone: "5519999111111",
+      pushName: "Lucas Cliente",
+    },
+  });
+  assert.notEqual(result, null);
+  assert.equal(result!.senderName, "Lucas Cliente");
 });
 
 // ─────────────────────────────────────────────────────────────────
@@ -507,7 +543,34 @@ test("mantém mensagens distintas", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────
-// 7. Fluxo integrado — cenário completo sem DB
+// 7. Regras do perfil música
+// ─────────────────────────────────────────────────────────────────
+console.log("\n▶ Regras do perfil música");
+
+test("perfil música nasce como cliente, não cold", () => {
+  const defaults = getOperationalDefaultsForProfile("musica-personalizada");
+  assert.equal(defaults.funnelStage, "CUSTOMER");
+  assert.equal(defaults.status, "CONVERTED");
+});
+
+test("outros perfis não recebem defaults da música", () => {
+  const defaults = getOperationalDefaultsForProfile("restauracao-fotos");
+  assert.equal(defaults.funnelStage, undefined);
+  assert.equal(defaults.status, undefined);
+});
+
+test("resolveLeadName usa nome real quando disponível", () => {
+  const result = resolveLeadName(["Cliente Real", "Outro"], "5511999999999");
+  assert.equal(result, "Cliente Real");
+});
+
+test("resolveLeadName usa telefone formatado quando nome não existe", () => {
+  const result = resolveLeadName([null, "", undefined], "5511999999999");
+  assert.equal(result, formatLeadPhoneFallback("5511999999999"));
+});
+
+// ─────────────────────────────────────────────────────────────────
+// 8. Fluxo integrado — cenário completo sem DB
 // ─────────────────────────────────────────────────────────────────
 console.log("\n▶ Cenário integrado (sem DB)");
 
@@ -588,7 +651,7 @@ test("CENÁRIO: lead pede transferência para humano → gate ativa", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────
-// 8. Caso B — batching de texto + imagem (MEDIA_PENDING)
+// 9. Caso B — batching de texto + imagem (MEDIA_PENDING)
 // ─────────────────────────────────────────────────────────────────
 console.log("\n▶ Caso B — janela de mídia (MEDIA_PENDING)");
 
@@ -663,7 +726,7 @@ test("shouldWaitForIncomingMedia: sem sinal de mídia → NÃO espera", () => {
 });
 
 // ─────────────────────────────────────────────────────────────────
-// 9. Caso F — mensagens de sistema da Meta não entram no histórico
+// 10. Caso F — mensagens de sistema da Meta não entram no histórico
 // ─────────────────────────────────────────────────────────────────
 console.log("\n▶ Caso F — mensagens de sistema da Meta");
 

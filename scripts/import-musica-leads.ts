@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/prisma";
+import { formatLeadPhoneFallback, getOperationalDefaultsForProfile } from "@/lib/lead-profile";
 import { MUSIC_PROFILE_SLUG } from "@/lib/profile-defaults";
 import { conversationService } from "@/services/conversation.service";
 import { leadService } from "@/services/lead.service";
@@ -26,6 +27,7 @@ function normalizePhone(value: string) {
 
 async function main() {
   const profile = await profileService.getProfileBySlug(MUSIC_PROFILE_SLUG);
+  const profileDefaults = getOperationalDefaultsForProfile(profile.slug);
   const phones = Array.from(new Set(RAW_PHONES.map(normalizePhone).filter(Boolean)));
 
   if (phones.length === 0) {
@@ -42,18 +44,30 @@ async function main() {
         source: "whatsapp_import",
       },
       profile.id,
+      { profileSlug: profile.slug },
     );
+
+    const conversation = await conversationService.getOrCreateOpenConversation(lead.id);
+
+    await prisma.lead.update({
+      where: { id: lead.id },
+      data: {
+        name: lead.name || formatLeadPhoneFallback(phone),
+        source: "whatsapp_import",
+        aiEnabled: profileDefaults.aiEnabled ?? false,
+        humanTakeover: profileDefaults.humanTakeover ?? true,
+        status: profileDefaults.status ?? undefined,
+        funnelStage: profileDefaults.funnelStage ?? undefined,
+        lastMessage: lead.lastMessage || "Contato importado do WhatsApp",
+        lastMessageAt: lead.lastMessageAt || new Date(),
+      },
+    });
 
     await Promise.all([
       leadService.ensureDefaultOfferTagForProfile(lead.id, profile.slug),
-      conversationService.getOrCreateOpenConversation(lead.id),
-      prisma.lead.update({
-        where: { id: lead.id },
-        data: {
-          aiEnabled: false,
-          humanTakeover: true,
-          source: "whatsapp_import",
-        },
+      prisma.conversation.update({
+        where: { id: conversation.id },
+        data: { updatedAt: new Date() },
       }),
     ]);
 

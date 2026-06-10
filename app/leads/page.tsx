@@ -37,6 +37,14 @@ const stageOptions = [
   { label: "Cliente", value: "CUSTOMER" },
 ];
 
+const stageLabelMap: Record<string, string> = {
+  COLD: "Frio",
+  WARM: "Morno",
+  HOT: "Quente",
+  CHECKOUT: "Checkout",
+  CUSTOMER: "Cliente",
+};
+
 const statusOptions = [
   { label: "Todos status", value: "ALL" },
   { label: "Novo", value: "NEW" },
@@ -478,10 +486,10 @@ export default function LeadsPage() {
                         />
                       </td>
                       <td className="px-3 py-3 font-medium text-zinc-200">
-                        {lead.name || "Sem nome"}
+                        {lead.name || formatPhone(lead.phone)}
                       </td>
                       <td className="px-3 py-3 text-zinc-400">{formatPhone(lead.phone)}</td>
-                      <td className="px-3 py-3">{lead.funnelStage}</td>
+                      <td className="px-3 py-3">{stageLabelMap[lead.funnelStage] || lead.funnelStage}</td>
                       <td className="px-3 py-3">
                         <div className="flex flex-wrap gap-1">
                           {lead.leadTags?.length ? (
@@ -494,9 +502,16 @@ export default function LeadsPage() {
                         </div>
                       </td>
                       <td className="px-3 py-3 text-zinc-400">
-                        {lead.lastMessageAt
-                          ? new Date(lead.lastMessageAt).toLocaleString("pt-BR")
-                          : "-"}
+                        <div className="max-w-[280px] space-y-1">
+                          <div>
+                            {lead.lastMessageAt
+                              ? new Date(lead.lastMessageAt).toLocaleString("pt-BR")
+                              : "-"}
+                          </div>
+                          <div className="truncate text-xs text-zinc-500">
+                            {lead.lastMessage || "-"}
+                          </div>
+                        </div>
                       </td>
                       <td className="px-3 py-3">
                         <Badge

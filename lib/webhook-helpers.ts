@@ -126,6 +126,41 @@ function extractMediaUrlOrBase64(payload: any, mediaNode: any) {
   );
 }
 
+function pickFirstNonEmptyString(candidates: unknown[]) {
+  for (const candidate of candidates) {
+    if (typeof candidate !== "string") continue;
+    const normalized = candidate.replace(/\s+/g, " ").trim();
+    if (normalized) return normalized;
+  }
+
+  return undefined;
+}
+
+function extractSenderName(payload: any) {
+  return pickFirstNonEmptyString([
+    payload?.data?.contact?.name,
+    payload?.data?.contact?.pushName,
+    payload?.data?.contact?.notify,
+    payload?.data?.contact?.verifiedName,
+    payload?.data?.contact?.profileName,
+    payload?.data?.senderName,
+    payload?.data?.verifiedName,
+    payload?.data?.profileName,
+    payload?.data?.notifyName,
+    payload?.data?.pushName,
+    payload?.contact?.name,
+    payload?.contact?.pushName,
+    payload?.contact?.notify,
+    payload?.contact?.verifiedName,
+    payload?.contact?.profileName,
+    payload?.senderName,
+    payload?.verifiedName,
+    payload?.profileName,
+    payload?.notifyName,
+    payload?.pushName,
+  ]);
+}
+
 function resolveMessageClassification(messageNode: any): {
   dbType: "TEXT" | "IMAGE" | "AUDIO";
   mediaKind: WhatsAppMediaKind;
@@ -180,12 +215,21 @@ function buildMetadata(args: {
   phone: string;
   mediaNode: any;
   mediaKind: WhatsAppMediaKind;
+  senderName?: string;
 }) {
   return {
     event: args.payload?.event || args.payload?.data?.event || null,
     key: args.keyNode ?? null,
     remoteJid: args.remoteJid,
     resolvedPhone: args.phone,
+    contact: {
+      name: args.payload?.data?.contact?.name ?? args.payload?.contact?.name ?? null,
+      pushName: args.payload?.data?.pushName ?? args.payload?.pushName ?? null,
+      notifyName: args.payload?.data?.notifyName ?? args.payload?.notifyName ?? null,
+      verifiedName: args.payload?.data?.verifiedName ?? args.payload?.verifiedName ?? null,
+      profileName: args.payload?.data?.profileName ?? args.payload?.profileName ?? null,
+      senderName: args.senderName ?? null,
+    },
     media: isMediaKind(args.mediaKind)
       ? {
           kind: args.mediaKind,
@@ -219,6 +263,7 @@ function extractPayload(
     "";
   const mediaNode = extractMediaNode(payload);
   const imageUrlOrBase64 = extractMediaUrlOrBase64(payload, mediaNode);
+  const senderName = extractSenderName(payload);
 
   // Ignorar se não tem remetente
   if (!remoteJid) return null;
@@ -253,7 +298,7 @@ function extractPayload(
       payload?.data?.replyTransport === "baileys_bridge"
         ? "baileys_bridge"
         : "evolution",
-    senderName: payload?.data?.pushName || payload?.pushName || undefined,
+    senderName,
     metadata: buildMetadata({
       payload,
       keyNode,
@@ -261,6 +306,7 @@ function extractPayload(
       phone,
       mediaNode,
       mediaKind: classification.mediaKind,
+      senderName,
     }),
   };
 }

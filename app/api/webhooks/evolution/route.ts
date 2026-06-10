@@ -569,6 +569,7 @@ export async function POST(request: Request) {
         mediaPending.phone,
         { source: "whatsapp" },
         profile.id,
+        { profileSlug: profile.slug },
       );
       await leadService.ensureDefaultOfferTagForProfile(lead.id, profile.slug);
       await prisma.lead
@@ -601,7 +602,7 @@ export async function POST(request: Request) {
 
       const lead = await leadService.upsertByPhone(outgoing.phone, {
         source: "whatsapp",
-      }, activeProfile.id);
+      }, activeProfile.id, { profileSlug: activeProfile.slug });
       await leadService.ensureDefaultOfferTagForProfile(lead.id, activeProfile.slug);
       const conversation = await conversationService.getOrCreateOpenConversation(lead.id);
 
@@ -665,7 +666,7 @@ export async function POST(request: Request) {
       const lead = await leadService.upsertByPhone(incoming.phone, {
         name: incoming.senderName,
         source: "whatsapp",
-      }, activeProfile.id);
+      }, activeProfile.id, { profileSlug: activeProfile.slug });
       await leadService.ensureDefaultOfferTagForProfile(lead.id, activeProfile.slug);
 
     // ── Criar/buscar conversa ────────────────────────────────
