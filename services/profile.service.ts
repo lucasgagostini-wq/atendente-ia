@@ -95,6 +95,7 @@ class ProfileService {
         name: PROFILE_DEFAULTS.music.name,
         description: PROFILE_DEFAULTS.music.description,
         promptConfig: musicPromptConfig(),
+        whatsappSessionName: "musica-personalizada",
       },
       create: {
         name: PROFILE_DEFAULTS.music.name,
@@ -103,6 +104,7 @@ class ProfileService {
         status: PROFILE_DEFAULTS.music.status,
         aiEnabled: false,
         promptConfig: musicPromptConfig(),
+        whatsappSessionName: "musica-personalizada",
       },
     });
 

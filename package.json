@@ -18,6 +18,8 @@
     "setup": "node scripts/setup.mjs",
     "bridge": "node --env-file=.env scripts/baileys-bridge.mjs",
     "bridge:baileys": "node --env-file=.env scripts/baileys-bridge.mjs",
+    "bridge:restauracao": "node --env-file=.env scripts/baileys-bridge.mjs",
+    "bridge:musica": "node --env-file=.env --env-file=.env.musica scripts/baileys-bridge.mjs",
     "bridge:local": "node --env-file=.env scripts/bridge-local.mjs",
     "start:local": "concurrently --names \"APP,WHATSAPP\" --prefix-colors \"cyan,green\" \"npm run dev\" \"npm run bridge:local\"",
     "whatsapp": "node scripts/start-whatsapp.mjs",
