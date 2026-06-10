@@ -349,6 +349,16 @@ export function receiptDecisionFromAnalysis(analysis: PixReceiptAnalysis): {
   alert: string;
   kind: string;
 } {
+  if (analysis.fallbackUsed && analysis.fallbackMode === "invalid_reupload") {
+    return {
+      stage: PAYMENT_STAGE_RECEIPT_INVALID,
+      message:
+        "Recebi a imagem, mas pra confirmar preciso do comprovante com valor, data e recebedor visíveis. Pode me reenviar assim?",
+      alert: "Analise visual indisponivel para validar o comprovante. Solicitar reenvio visivel.",
+      kind: "vision_unavailable_reupload",
+    };
+  }
+
   if (analysis.isRandomImage || !analysis.looksLikePixReceipt) {
     return {
       stage: PAYMENT_STAGE_RECEIPT_INVALID,

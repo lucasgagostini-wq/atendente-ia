@@ -27,6 +27,7 @@ export type PixReceiptAnalysis = {
   reason: string;
   confidence: "low" | "medium" | "high";
   fallbackUsed?: boolean;
+  fallbackMode?: "manual_review" | "invalid_reupload";
 };
 
 type AnalyzeArgs = {
@@ -72,10 +73,13 @@ function normalizeAnalysis(raw: Partial<PixReceiptAnalysis> | null): PixReceiptA
   };
 }
 
-function fallbackReceiptAnalysis(reason: string): PixReceiptAnalysis {
+function fallbackReceiptAnalysis(
+  reason: string,
+  mode: "manual_review" | "invalid_reupload" = "manual_review",
+): PixReceiptAnalysis {
   return {
-    looksLikePixReceipt: true,
-    isRandomImage: false,
+    looksLikePixReceipt: mode === "manual_review",
+    isRandomImage: mode === "invalid_reupload",
     recipientNameFound: null,
     pixKeyFound: null,
     bankFound: null,
@@ -91,6 +95,7 @@ function fallbackReceiptAnalysis(reason: string): PixReceiptAnalysis {
     reason,
     confidence: "low",
     fallbackUsed: true,
+    fallbackMode: mode,
   };
 }
 
@@ -107,6 +112,7 @@ class PaymentReceiptService {
     if (!imageUrlOrBase64 || !apiKey || !visionModel) {
       const analysis = fallbackReceiptAnalysis(
         "Sem imagem acessível ou modelo de visão configurado. Conferir pagamento manualmente.",
+        "manual_review",
       );
       await prisma.log.create({
         data: {
@@ -191,8 +197,22 @@ class PaymentReceiptService {
 
       return analysis;
     } catch (error) {
+      const status = axios.isAxiosError(error) ? error.response?.status ?? null : null;
+      const detailMessage =
+        axios.isAxiosError(error) && error.response?.data
+          ? JSON.stringify(error.response.data).toLowerCase()
+          : "";
+      const visionUnavailable =
+        status === 404 &&
+        (detailMessage.includes("model is unavailable") ||
+          detailMessage.includes("paid version is available") ||
+          detailMessage.includes("unavailable for free"));
+
       const analysis = fallbackReceiptAnalysis(
-        "Falha na análise visual. Conferir pagamento manualmente.",
+        visionUnavailable
+          ? "Nao consegui validar esse comprovante por imagem agora. Preciso que ele mostre valor, data e recebedor visiveis."
+          : "Falha na análise visual. Conferir pagamento manualmente.",
+        visionUnavailable ? "invalid_reupload" : "manual_review",
       );
 
       await prisma.log.create({
@@ -201,8 +221,9 @@ class PaymentReceiptService {
           message: error instanceof Error ? error.message : "Erro desconhecido na análise visual",
           payload: {
             model: visionModel,
-            status: axios.isAxiosError(error) ? error.response?.status ?? null : null,
+            status,
             detail: axios.isAxiosError(error) ? error.response?.data ?? null : null,
+            fallbackMode: analysis.fallbackMode,
           },
         },
       }).catch(() => {});

@@ -152,6 +152,33 @@ export const fixtures: Fixture[] = [
     },
   },
 
+  {
+    id: "d_receipt_vision_unavailable_requests_visible_receipt",
+    title: "D2) Visao indisponivel ao validar comprovante → pedir reenvio visivel",
+    classification: "fallback operacional de comprovante",
+    description:
+      "Se o modelo de visão estiver indisponível e o lead mandar uma imagem como comprovante, o fluxo deve pedir reenvio com valor, data e recebedor visíveis em vez de cair em revisão neutra.",
+    recentHistory: [
+      "Atendente: O Pix é estudiofotos000@gmail.com",
+      "Atendente: Nome: Lucas Agostini — Nubank",
+      "Atendente: Depois que fizer o Pix e mandar o comprovante, eu começo por aqui.",
+    ],
+    summary: "[FOTO_RECEBIDA]\n[PAGAMENTO: WAITING_PAYMENT_RECEIPT]",
+    batch: [{ content: "Paguei, segue comprovante.", type: "IMAGE" }],
+    mockReceiptAnalysis: {
+      fallbackUsed: true,
+      fallbackMode: "invalid_reupload",
+      looksLikePixReceipt: false,
+      isRandomImage: true,
+    },
+    expect: {
+      route: "payment_receipt",
+      required: [/comprovante/i, /valor/i, /data/i, /recebedor/i],
+      forbidden: [...POST_PIX_FORBIDDEN, ...POST_PHOTO_FORBIDDEN],
+      maxMessages: 1,
+    },
+  },
+
   // ── E) Restauração emocional ───────────────────────────────────
   {
     id: "e_emotional_restoration",
