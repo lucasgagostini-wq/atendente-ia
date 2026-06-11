@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { Columns3, MessageCircle, MoveRight } from "lucide-react";
+import { MessageCircle } from "lucide-react";
 import { toast } from "sonner";
 import { useKanbanLeads, useUpdateOperationStage } from "@/hooks/use-kanban";
 import { useProfiles } from "@/hooks/use-profiles";
@@ -39,35 +39,29 @@ function KanbanCard({
       draggable
       onDragStart={() => onDragStart(lead.id)}
       onDragEnd={onDragEnd}
-      className="cursor-grab rounded-xl border border-zinc-800/80 bg-zinc-950/80 p-2.5 shadow-[0_10px_24px_rgba(0,0,0,0.16)] transition hover:border-zinc-700 active:cursor-grabbing"
+      className="cursor-grab rounded-xl border border-zinc-800/80 bg-zinc-950/80 p-3 shadow-[0_2px_8px_rgba(0,0,0,0.24)] transition hover:border-zinc-700 active:cursor-grabbing"
     >
-      <div className="flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="truncate text-xs font-semibold text-zinc-100">
-            {lead.name || formatPhone(lead.phone)}
-          </p>
-          <p className="mt-0.5 truncate text-[11px] text-zinc-500">{formatPhone(lead.phone)}</p>
-        </div>
-        <Badge variant="info">{lead.funnelStage}</Badge>
+      <div className="mb-2">
+        <p className="text-xs font-semibold text-zinc-100 leading-tight">
+          {lead.name || formatPhone(lead.phone)}
+        </p>
+        {lead.name && (
+          <p className="mt-0.5 text-[11px] text-zinc-500">{formatPhone(lead.phone)}</p>
+        )}
       </div>
 
-      <div className="mt-2 flex flex-wrap gap-1.5">
-        <Badge variant="warning">Música Personalizada</Badge>
-        <Badge variant="success">{lead.status}</Badge>
-      </div>
-
-      <div className="mt-2 rounded-lg border border-zinc-800/80 bg-zinc-900/60 px-2.5 py-2">
-        <p className="overflow-hidden text-[11px] leading-4 text-zinc-300 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">
+      <div className="rounded-lg border border-zinc-800/60 bg-zinc-900/50 px-2.5 py-1.5">
+        <p className="text-[11px] leading-[1.45] text-zinc-400 line-clamp-3">
           {lead.lastMessage || "Sem mensagem recente"}
         </p>
-        <p className="mt-1 text-[10px] text-zinc-500">
+        <p className="mt-1 text-[10px] text-zinc-600">
           {lead.lastMessageAt
             ? `${formatRelativeConversationTime(lead.lastMessageAt, Date.now())} · ${new Date(lead.lastMessageAt).toLocaleString("pt-BR")}`
             : new Date(lead.updatedAt).toLocaleString("pt-BR")}
         </p>
       </div>
 
-      <div className="mt-2 flex items-center justify-between gap-3">
+      <div className="mt-2">
         <Link
           href={conversationHref}
           className="inline-flex items-center gap-1.5 text-[11px] font-medium text-indigo-400 transition hover:text-indigo-300"
@@ -75,10 +69,6 @@ function KanbanCard({
           <MessageCircle className="size-3.5" />
           Abrir conversa
         </Link>
-        <span className="inline-flex items-center gap-1 text-[10px] text-zinc-500">
-          Arraste
-          <MoveRight className="size-3" />
-        </span>
       </div>
     </article>
   );
@@ -119,22 +109,19 @@ function KanbanColumn({
           : "border-zinc-800/80 bg-zinc-900/55"
       }`}
     >
-      <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-zinc-800/80 bg-zinc-900/95 px-3 py-2 backdrop-blur">
-        <div>
-          <h2 className="text-xs font-semibold text-zinc-100">
-            {MUSIC_OPERATION_STAGE_LABELS[stage]}
-          </h2>
-          <p className="mt-0.5 text-[11px] text-zinc-500">
-            {leads.length === 1 ? "1 pedido" : `${leads.length} pedidos`}
-          </p>
-        </div>
-        <Badge variant="default">{leads.length}</Badge>
+      <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-zinc-800/80 bg-zinc-900/95 px-3 py-2.5 backdrop-blur">
+        <h2 className="text-xs font-semibold text-zinc-100">
+          {MUSIC_OPERATION_STAGE_LABELS[stage]}
+        </h2>
+        <span className="flex size-5 items-center justify-center rounded-full bg-zinc-800 text-[10px] font-semibold text-zinc-400">
+          {leads.length}
+        </span>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-3">
+      <div className="scrollbar-thin flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-2.5">
         {leads.length === 0 && (
-          <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-zinc-800 bg-zinc-950/30 px-3 text-center text-xs text-zinc-500">
-            Nenhum pedido aqui
+          <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-zinc-800 bg-zinc-950/30 px-3 py-6 text-center text-xs text-zinc-600">
+            Vazio
           </div>
         )}
 
@@ -222,18 +209,14 @@ export default function KanbanPage() {
     <div className="flex h-[calc(100vh-176px)] flex-col gap-4 overflow-hidden">
       <div className="flex flex-none flex-wrap items-center justify-between gap-3">
         <div>
-          <div className="flex items-center gap-2">
-            <Columns3 className="size-5 text-amber-400" />
-            <h1>Kanban operacional</h1>
-            {activeProfile && <Badge variant="info">{activeProfile.name}</Badge>}
-          </div>
-          <p className="mt-1 text-sm text-zinc-400">
-            Organize os pedidos pagos da música personalizada em um fluxo de entrega estilo Trello.
+          <h1>Kanban operacional</h1>
+          <p className="mt-0.5 text-sm text-zinc-500">
+            Fluxo de entrega da música personalizada.
           </p>
         </div>
-        <Badge variant="success">
-          {leads.length === 1 ? "1 pedido total" : `${leads.length} pedidos totais`}
-        </Badge>
+        <span className="text-xs text-zinc-500">
+          {leads.length === 1 ? "1 pedido" : `${leads.length} pedidos`}
+        </span>
       </div>
 
       {isLoading ? (
