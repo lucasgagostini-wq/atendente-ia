@@ -1,10 +1,28 @@
-import { FunnelStage, LeadStatus } from "@prisma/client";
+import { FunnelStage, LeadStatus, OperationStage } from "@prisma/client";
 import { MUSIC_PROFILE_SLUG } from "@/lib/profile-defaults";
 
 export const MUSIC_OFFER_TAG = {
   name: "Música Personalizada",
   color: "#F59E0B",
 } as const;
+
+export const MUSIC_OPERATION_STAGE_ORDER: OperationStage[] = [
+  "PAID_ORDER",
+  "PRODUCTION",
+  "READY_TO_SEND",
+  "SENT",
+  "PIX_RECOVERY",
+  "SUPPORT",
+];
+
+export const MUSIC_OPERATION_STAGE_LABELS: Record<OperationStage, string> = {
+  PAID_ORDER: "Pedido pago",
+  PRODUCTION: "Produção",
+  READY_TO_SEND: "Pronto para enviar",
+  SENT: "Enviado",
+  PIX_RECOVERY: "Recuperação de Pix",
+  SUPPORT: "Suporte",
+};
 
 export function isMusicProfileSlug(profileSlug?: string | null) {
   return profileSlug === MUSIC_PROFILE_SLUG;
@@ -45,6 +63,7 @@ export function resolveLeadName(
 export function getOperationalDefaultsForProfile(profileSlug?: string | null): {
   status?: LeadStatus;
   funnelStage?: FunnelStage;
+  operationStage?: OperationStage;
   aiEnabled?: boolean;
   humanTakeover?: boolean;
 } {
@@ -52,6 +71,7 @@ export function getOperationalDefaultsForProfile(profileSlug?: string | null): {
     return {
       status: "CONVERTED",
       funnelStage: "CUSTOMER",
+      operationStage: "PAID_ORDER",
       aiEnabled: false,
       humanTakeover: true,
     };

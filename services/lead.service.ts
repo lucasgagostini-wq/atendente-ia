@@ -1,4 +1,4 @@
-import { FunnelStage, LeadStatus, Prisma } from "@prisma/client";
+import { FunnelStage, LeadStatus, OperationStage, Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import {
   MUSIC_OFFER_TAG,
@@ -14,6 +14,7 @@ type LeadFilters = {
   profileId?: string;
   search?: string;
   stage?: FunnelStage;
+  operationStage?: OperationStage;
   status?: LeadStatus;
   tagId?: string;
   onlyDialable?: boolean;
@@ -31,6 +32,7 @@ type BulkLeadActionInput = {
   data?: {
     status?: LeadStatus;
     funnelStage?: FunnelStage;
+    operationStage?: OperationStage;
     source?: string | null;
     aiEnabled?: boolean;
     humanTakeover?: boolean;
@@ -61,6 +63,7 @@ class LeadService {
     }
 
     if (filters.stage) where.funnelStage = filters.stage;
+    if (filters.operationStage) where.operationStage = filters.operationStage;
     if (filters.status) where.status = filters.status;
     if (filters.tagId) {
       where.leadTags = {
@@ -81,6 +84,14 @@ class LeadService {
       include: {
         leadTags: {
           include: { tag: true },
+        },
+        conversations: {
+          select: {
+            id: true,
+            updatedAt: true,
+          },
+          orderBy: { updatedAt: "desc" },
+          take: 1,
         },
       },
       orderBy: [{ lastMessageAt: "desc" }, { createdAt: "desc" }],
@@ -174,6 +185,7 @@ class LeadService {
         summary: payload?.summary,
         status: profileDefaults.status,
         funnelStage: profileDefaults.funnelStage,
+        operationStage: profileDefaults.operationStage,
         aiEnabled: profileDefaults.aiEnabled,
         humanTakeover: profileDefaults.humanTakeover,
       },
@@ -225,9 +237,70 @@ class LeadService {
         where: { id },
         include: {
           leadTags: { include: { tag: true } },
+          conversations: {
+            select: {
+              id: true,
+              updatedAt: true,
+            },
+            orderBy: { updatedAt: "desc" },
+            take: 1,
+          },
         },
       });
     });
+  }
+
+  async updateOperationStage(args: {
+    leadId: string;
+    profileId: string;
+    operationStage: OperationStage;
+  }) {
+    const lead = await prisma.lead.findFirst({
+      where: {
+        id: args.leadId,
+        profileId: args.profileId,
+      },
+    });
+
+    if (!lead) {
+      throw new Error("Lead não encontrado para este perfil");
+    }
+
+    return prisma.lead.update({
+      where: { id: args.leadId },
+      data: {
+        operationStage: args.operationStage,
+      },
+      include: {
+        leadTags: { include: { tag: true } },
+        conversations: {
+          select: {
+            id: true,
+            updatedAt: true,
+          },
+          orderBy: { updatedAt: "desc" },
+          take: 1,
+        },
+      },
+    });
+  }
+
+  async backfillOperationStageForProfile(profileId: string, operationStage?: OperationStage) {
+    if (!operationStage) {
+      return { affected: 0 };
+    }
+
+    const result = await prisma.lead.updateMany({
+      where: {
+        profileId,
+        operationStage: null,
+      },
+      data: {
+        operationStage,
+      },
+    });
+
+    return { affected: result.count };
   }
 
   async updateLastInteraction(leadId: string, message: string) {
@@ -314,6 +387,7 @@ class LeadService {
     const updateData: Prisma.LeadUpdateManyMutationInput = {};
     if (data.status) updateData.status = data.status;
     if (data.funnelStage) updateData.funnelStage = data.funnelStage;
+    if (data.operationStage) updateData.operationStage = data.operationStage;
     if (data.source !== undefined) updateData.source = data.source;
     if (data.aiEnabled !== undefined) updateData.aiEnabled = data.aiEnabled;
     if (data.humanTakeover !== undefined) {

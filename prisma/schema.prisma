@@ -24,6 +24,15 @@ enum FunnelStage {
   CUSTOMER
 }
 
+enum OperationStage {
+  PAID_ORDER
+  PRODUCTION
+  READY_TO_SEND
+  SENT
+  PIX_RECOVERY
+  SUPPORT
+}
+
 enum ConversationStatus {
   OPEN
   ARCHIVED
@@ -100,6 +109,7 @@ model Lead {
   phone          String
   status         LeadStatus     @default(NEW)
   funnelStage    FunnelStage    @default(COLD)
+  operationStage OperationStage?
   source         String?
   aiEnabled      Boolean        @default(true)
   humanTakeover  Boolean        @default(false)
@@ -129,6 +139,7 @@ model Lead {
 
   @@unique([profileId, phone])
   @@index([profileId, lastMessageAt])
+  @@index([profileId, operationStage, lastMessageAt])
 }
 
 model Conversation {

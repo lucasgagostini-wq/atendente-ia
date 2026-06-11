@@ -10,6 +10,7 @@ import { profileService } from "@/services/profile.service";
 async function main() {
   const profile = await profileService.getProfileBySlug(MUSIC_PROFILE_SLUG);
   const profileDefaults = getOperationalDefaultsForProfile(profile.slug);
+  await leadService.backfillOperationStageForProfile(profile.id, profileDefaults.operationStage);
 
   const leads = await prisma.lead.findMany({
     where: { profileId: profile.id },
@@ -70,6 +71,7 @@ async function main() {
           formatLeadPhoneFallback(lead.phone),
         status: profileDefaults.status ?? lead.status,
         funnelStage: profileDefaults.funnelStage ?? lead.funnelStage,
+        operationStage: profileDefaults.operationStage ?? lead.operationStage,
         aiEnabled: profileDefaults.aiEnabled ?? lead.aiEnabled,
         humanTakeover: profileDefaults.humanTakeover ?? lead.humanTakeover,
         lastMessage: fallbackMessage,

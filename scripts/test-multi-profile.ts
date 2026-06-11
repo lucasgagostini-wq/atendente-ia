@@ -83,6 +83,7 @@ async function main() {
     const restoredMusicLead = await leadService.getLeadById(musicLead.id, music.id);
     assert.equal(restoredMusicLead?.funnelStage, "CUSTOMER");
     assert.equal(restoredMusicLead?.status, "CONVERTED");
+    assert.equal(restoredMusicLead?.operationStage, "PAID_ORDER");
     assert.equal(restoredMusicLead?.name, "Cliente Teste Musica");
     assert.equal(restoredMusicLead?.lastMessage, "Teste de última interação música");
     assert.ok(restoredMusicLead?.lastMessageAt, "lead de música deve ter última interação");
@@ -100,6 +101,24 @@ async function main() {
     cleanupLeadIds.push(fallbackMusicLead.id);
     assert.notEqual(fallbackMusicLead.name, null);
     assert.notEqual(fallbackMusicLead.name, "");
+    assert.equal(fallbackMusicLead.operationStage, "PAID_ORDER");
+
+    const movedMusicLead = await leadService.updateOperationStage({
+      leadId: musicLead.id,
+      profileId: music.id,
+      operationStage: "PRODUCTION",
+    });
+    assert.equal(movedMusicLead.operationStage, "PRODUCTION");
+
+    await assert.rejects(
+      () =>
+        leadService.updateOperationStage({
+          leadId: musicLead.id,
+          profileId: restoration.id,
+          operationStage: "SENT",
+        }),
+      /Lead não encontrado para este perfil/i,
+    );
 
     const restorationLead = await leadService.upsertByPhone(
       restorationPhone,
@@ -112,11 +131,27 @@ async function main() {
     const restoredRestorationLead = await leadService.getLeadById(restorationLead.id, restoration.id);
     assert.equal(restoredRestorationLead?.funnelStage, "COLD");
     assert.equal(restoredRestorationLead?.status, "NEW");
+    assert.equal(restoredRestorationLead?.operationStage, null);
     assert.equal(
       restoredRestorationLead?.leadTags.some((item) => item.tag.name === "Música Personalizada"),
       false,
       "restauração não deve receber tag da música",
     );
+
+    const nullStageLead = await leadService.upsertByPhone(
+      `55116123${String(now).slice(-4)}`,
+      { source: "webhook_test" },
+      music.id,
+    );
+    cleanupLeadIds.push(nullStageLead.id);
+    await prisma.lead.update({
+      where: { id: nullStageLead.id },
+      data: { operationStage: null },
+    });
+    const backfillResult = await leadService.backfillOperationStageForProfile(music.id, "PAID_ORDER");
+    assert.ok(backfillResult.affected >= 1, "backfill do Kanban deve preencher estágio operacional");
+    const restoredNullStageLead = await leadService.getLeadById(nullStageLead.id, music.id);
+    assert.equal(restoredNullStageLead?.operationStage, "PAID_ORDER");
   } finally {
     if (cleanupLeadIds.length > 0) {
       await prisma.lead.deleteMany({

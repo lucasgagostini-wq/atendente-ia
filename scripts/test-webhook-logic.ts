@@ -551,6 +551,7 @@ test("perfil música nasce como cliente, não cold", () => {
   const defaults = getOperationalDefaultsForProfile("musica-personalizada");
   assert.equal(defaults.funnelStage, "CUSTOMER");
   assert.equal(defaults.status, "CONVERTED");
+  assert.equal(defaults.operationStage, "PAID_ORDER");
 });
 
 test("outros perfis não recebem defaults da música", () => {

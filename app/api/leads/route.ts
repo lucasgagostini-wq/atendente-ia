@@ -1,4 +1,4 @@
-import { FunnelStage, LeadStatus } from "@prisma/client";
+import { FunnelStage, LeadStatus, OperationStage } from "@prisma/client";
 import { NextRequest, NextResponse } from "next/server";
 import { getOperationalDefaultsForProfile, resolveLeadName } from "@/lib/lead-profile";
 import { leadSchema } from "@/lib/validations";
@@ -27,6 +27,7 @@ export async function GET(request: NextRequest) {
       profileId: activeProfile.id,
       search: searchParams.get("search") ?? undefined,
       stage: (searchParams.get("stage") as FunnelStage | null) ?? undefined,
+      operationStage: (searchParams.get("operationStage") as OperationStage | null) ?? undefined,
       status: (searchParams.get("status") as LeadStatus | null) ?? undefined,
       tagId: searchParams.get("tagId") ?? undefined,
       onlyDialable: searchParams.get("onlyDialable") === "true",
@@ -62,6 +63,7 @@ export async function POST(request: Request) {
       source: toNullable(parsed.data.source),
       status: parsed.data.status ?? profileDefaults.status ?? "NEW",
       funnelStage: parsed.data.funnelStage ?? profileDefaults.funnelStage ?? "COLD",
+      operationStage: parsed.data.operationStage ?? profileDefaults.operationStage ?? undefined,
       aiEnabled: parsed.data.aiEnabled ?? profileDefaults.aiEnabled ?? true,
       humanTakeover: parsed.data.humanTakeover ?? profileDefaults.humanTakeover ?? false,
       summary: toNullable(parsed.data.summary),

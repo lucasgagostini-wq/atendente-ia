@@ -1,5 +1,12 @@
 export type LeadStatus = "NEW" | "QUALIFIED" | "NEGOTIATION" | "CONVERTED" | "LOST";
 export type FunnelStage = "COLD" | "WARM" | "HOT" | "CHECKOUT" | "CUSTOMER";
+export type OperationStage =
+  | "PAID_ORDER"
+  | "PRODUCTION"
+  | "READY_TO_SEND"
+  | "SENT"
+  | "PIX_RECOVERY"
+  | "SUPPORT";
 export type ConversationStatus = "OPEN" | "ARCHIVED" | "CLOSED";
 export type MessageDirection = "INBOUND" | "OUTBOUND";
 export type MessageRole = "LEAD" | "ASSISTANT" | "HUMAN" | "SYSTEM";
@@ -32,6 +39,7 @@ export type Lead = {
   phone: string;
   status: LeadStatus;
   funnelStage: FunnelStage;
+  operationStage: OperationStage | null;
   source: string | null;
   aiEnabled: boolean;
   humanTakeover: boolean;
@@ -42,6 +50,10 @@ export type Lead = {
   lastMessageAt: string | null;
   createdAt: string;
   updatedAt: string;
+  conversations?: Array<{
+    id: string;
+    updatedAt: string;
+  }>;
   tags?: Tag[];
   leadTags?: Array<{
     leadId: string;

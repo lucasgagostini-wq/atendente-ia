@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import { FormEvent, useEffect, useRef, useMemo, useState } from "react";
 import {
   ExternalLink,
@@ -31,6 +32,7 @@ import { useUpdateLead } from "@/hooks/use-leads";
 import { useProfiles } from "@/hooks/use-profiles";
 import { formatPhone } from "@/lib/utils";
 import { formatRelativeConversationTime } from "@/lib/relative-time";
+import { buildProfileHref } from "@/lib/profile-utils";
 import { useAppStore } from "@/store/app-store";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -249,6 +251,7 @@ export default function ConversasPage() {
   const [manualMessage, setManualMessage] = useState("");
   const [sending, setSending] = useState(false);
   const [relativeNow, setRelativeNow] = useState(() => Date.now());
+  const [requestedConversationId, setRequestedConversationId] = useState<string | null>(null);
   const [seenLatestMessageByConversation, setSeenLatestMessageByConversation] = useState<
     Record<string, string | null>
   >({});
@@ -257,6 +260,12 @@ export default function ConversasPage() {
   const updateLead = useUpdateLead();
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const initializedSeenStateRef = useRef(false);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    setRequestedConversationId(params.get("conversationId"));
+  }, []);
 
   const filteredConversations = useMemo(() => {
     return conversations.filter((c) => {
@@ -269,10 +278,25 @@ export default function ConversasPage() {
   }, [conversations, search, stageFilter]);
 
   useEffect(() => {
+    if (requestedConversationId) {
+      const requestedConversation = filteredConversations.find(
+        (conversation) => conversation.id === requestedConversationId,
+      );
+      if (requestedConversation && selectedConversationId !== requestedConversation.id) {
+        setSelectedConversationId(requestedConversation.id);
+        return;
+      }
+    }
+
     if (!selectedConversationId && filteredConversations.length > 0) {
       setSelectedConversationId(filteredConversations[0].id);
     }
-  }, [filteredConversations, selectedConversationId, setSelectedConversationId]);
+  }, [
+    filteredConversations,
+    requestedConversationId,
+    selectedConversationId,
+    setSelectedConversationId,
+  ]);
 
   const { data: selectedData, refetch } = useConversation(selectedConversationId ?? undefined);
   const selected = selectedData as Conversation | undefined;
@@ -603,6 +627,14 @@ export default function ConversasPage() {
                     <Phone className="size-3" aria-hidden="true" />
                     <span>{formatPhone(lead?.phone || "-")}</span>
                   </p>
+                  {selected?.id && activeProfile?.slug && (
+                    <Link
+                      href={buildProfileHref(`/conversas?conversationId=${selected.id}`, activeProfile.slug)}
+                      className="mt-1 inline-flex text-[11px] text-indigo-400 hover:text-indigo-300"
+                    >
+                      Link direto desta conversa
+                    </Link>
+                  )}
                 </div>
               </div>
 

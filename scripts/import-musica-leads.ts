@@ -58,6 +58,7 @@ async function main() {
         humanTakeover: profileDefaults.humanTakeover ?? true,
         status: profileDefaults.status ?? undefined,
         funnelStage: profileDefaults.funnelStage ?? undefined,
+        operationStage: profileDefaults.operationStage ?? undefined,
         lastMessage: lead.lastMessage || "Contato importado do WhatsApp",
         lastMessageAt: lead.lastMessageAt || new Date(),
       },

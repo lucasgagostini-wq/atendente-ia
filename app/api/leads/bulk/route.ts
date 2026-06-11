@@ -50,6 +50,7 @@ export async function POST(request: Request) {
       const hasAnyField = [
         data.status,
         data.funnelStage,
+        data.operationStage,
         data.aiEnabled,
         data.humanTakeover,
         data.source,

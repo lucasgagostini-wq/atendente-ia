@@ -3,6 +3,14 @@ import { z } from "zod";
 export const messageTypeSchema = z.enum(["TEXT", "IMAGE", "AUDIO"]);
 export const directionSchema = z.enum(["INBOUND", "OUTBOUND"]);
 export const roleSchema = z.enum(["LEAD", "ASSISTANT", "HUMAN", "SYSTEM"]);
+export const operationStageSchema = z.enum([
+  "PAID_ORDER",
+  "PRODUCTION",
+  "READY_TO_SEND",
+  "SENT",
+  "PIX_RECOVERY",
+  "SUPPORT",
+]);
 
 export const leadSchema = z.object({
   name: z.string().min(1).optional().or(z.literal("")),
@@ -13,6 +21,7 @@ export const leadSchema = z.object({
   funnelStage: z
     .enum(["COLD", "WARM", "HOT", "CHECKOUT", "CUSTOMER"])
     .optional(),
+  operationStage: operationStageSchema.optional(),
   source: z.string().optional().or(z.literal("")),
   aiEnabled: z.boolean().optional(),
   humanTakeover: z.boolean().optional(),
@@ -107,6 +116,7 @@ export const prospectorImportSchema = z.object({
 const leadBulkDataSchema = z.object({
   status: z.enum(["NEW", "QUALIFIED", "NEGOTIATION", "CONVERTED", "LOST"]).optional(),
   funnelStage: z.enum(["COLD", "WARM", "HOT", "CHECKOUT", "CUSTOMER"]).optional(),
+  operationStage: operationStageSchema.optional(),
   source: z.string().optional().or(z.literal("")),
   aiEnabled: z.boolean().optional(),
   humanTakeover: z.boolean().optional(),

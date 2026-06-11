@@ -56,6 +56,7 @@ export async function PATCH(request: Request, context: Context) {
       source: toNullable(parsed.data.source),
       status: parsed.data.status,
       funnelStage: parsed.data.funnelStage,
+      operationStage: parsed.data.operationStage,
       aiEnabled: parsed.data.aiEnabled,
       humanTakeover: parsed.data.humanTakeover,
       summary: toNullable(parsed.data.summary),

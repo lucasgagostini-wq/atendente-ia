@@ -4,6 +4,7 @@ import {
   House,
   MapPin,
   Megaphone,
+  SquaresFour,
   Sparkle,
   TreeStructure,
   Users,
@@ -17,6 +18,7 @@ export const navGroups = [
       { href: "/dashboard", label: "Dashboard", shortLabel: "Central", icon: House, weight: "duotone" as const },
       { href: "/conversas", label: "Conversas", shortLabel: "Conversas", icon: ChatCircleText, weight: "duotone" as const },
       { href: "/leads", label: "Leads", shortLabel: "Leads", icon: Users, weight: "duotone" as const },
+      { href: "/kanban", label: "Kanban", shortLabel: "Kanban", icon: SquaresFour, weight: "duotone" as const },
     ],
   },
   {
@@ -42,6 +44,7 @@ const routeDescriptions: Record<string, string> = {
   "/dashboard": "Resumo da operação, prontidão da IA e próximos passos do admin.",
   "/conversas": "Acompanhe atendimentos, assuma conversas e monitore respostas da IA.",
   "/leads": "Organize o CRM, edite contatos e aplique ações em massa com rapidez.",
+  "/kanban": "Acompanhe os pedidos pagos da música personalizada em um board operacional.",
   "/disparos": "Monte campanhas por tag, defina mensagens e intervalos de envio.",
   "/automacoes": "Controle regras, gatilhos e fluxos automáticos da plataforma.",
   "/prospeccao": "Busque leads no Google Maps e envie para o CRM quando fizer sentido.",
