@@ -30,6 +30,7 @@ import { useAiPausedState, useToggleAiPause } from "@/hooks/use-ai-toggle";
 import { useIntegrationsStatus } from "@/hooks/use-integrations";
 import { useUpdateLead } from "@/hooks/use-leads";
 import { useProfiles } from "@/hooks/use-profiles";
+import { apiRequest as request } from "@/lib/api-client";
 import { formatPhone } from "@/lib/utils";
 import { formatRelativeConversationTime } from "@/lib/relative-time";
 import { buildProfileHref } from "@/lib/profile-utils";
@@ -42,7 +43,13 @@ import {
   normalizeMediaKind,
   resolveMessagePreviewText,
 } from "@/lib/message-media";
-import { Conversation, Message, MessageMediaKind, MessageMediaMetadata } from "@/types";
+import {
+  Conversation,
+  Message,
+  MessageMediaKind,
+  MessageMediaMetadata,
+  OutboundMessageJob,
+} from "@/types";
 
 // ─── Helpers ──────────────────────────────────────────────
 
@@ -51,6 +58,12 @@ const stageLabelMap: Record<string, string> = {
 };
 const stageVariantMap: Record<string, "default" | "info" | "warning" | "success" | "purple"> = {
   COLD: "default", WARM: "info", HOT: "warning", CHECKOUT: "purple", CUSTOMER: "success",
+};
+const outboundJobLabelMap: Record<OutboundMessageJob["status"], string> = {
+  PENDING: "Na fila da bridge",
+  PROCESSING: "Enviando pelo WhatsApp",
+  SENT: "Enviada",
+  ERROR: "Falha no envio",
 };
 
 function formatMessageTime(dateStr: string) {
@@ -302,6 +315,7 @@ export default function ConversasPage() {
   const selected = selectedData as Conversation | undefined;
   const lead = selected?.lead;
   const messages = selected?.messages ?? [];
+  const outboundJobs = selected?.outboundMessageJobs ?? [];
   const selectedLatestMessage = getLatestMessage(messages);
 
   useEffect(() => {
@@ -316,7 +330,7 @@ export default function ConversasPage() {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length]);
+  }, [messages.length, outboundJobs.length]);
 
   useEffect(() => {
     if (initializedSeenStateRef.current || conversations.length === 0) return;
@@ -346,14 +360,18 @@ export default function ConversasPage() {
     if (!lead || !manualMessage.trim()) return;
     try {
       setSending(true);
-      const res = await fetch("/api/evolution/send", {
+      const data = await request<{
+        ok: boolean;
+        mode?: "direct" | "outbox";
+        queued?: boolean;
+      }>("/api/evolution/send", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ phone: lead.phone, text: manualMessage.trim() }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Falha ao enviar");
       setManualMessage("");
+      if (data.mode === "outbox") {
+        toast.success("Mensagem entrou na fila da bridge local.");
+      }
       await refetch();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Falha ao enviar mensagem.");
@@ -790,6 +808,35 @@ export default function ConversasPage() {
                     </div>
                   </div>
                 )}
+
+                {outboundJobs.map((job) => (
+                  <div key={job.id} className="mt-3 flex justify-end">
+                    <div className="flex max-w-[72%] flex-col gap-1">
+                      <div
+                        className={`rounded-2xl rounded-tr-sm border px-3.5 py-2.5 text-sm ${
+                          job.status === "ERROR"
+                            ? "border-rose-500/30 bg-rose-500/10 text-rose-100"
+                            : "border-zinc-700/50 bg-zinc-800/70 text-zinc-100"
+                        }`}
+                      >
+                        <p className="whitespace-pre-wrap break-words">{job.text}</p>
+                      </div>
+                      <div className="flex items-center justify-end gap-1.5 px-1 text-[10px]">
+                        <span className={job.status === "ERROR" ? "text-rose-400" : "text-zinc-500"}>
+                          {outboundJobLabelMap[job.status]}
+                        </span>
+                        <span className="text-zinc-600">
+                          {formatMessageTime(job.createdAt)}
+                        </span>
+                      </div>
+                      {job.status === "ERROR" && job.errorMessage && (
+                        <p className="px-1 text-right text-[10px] text-rose-400/85">
+                          {job.errorMessage}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                ))}
 
                 <div ref={messagesEndRef} />
               </div>

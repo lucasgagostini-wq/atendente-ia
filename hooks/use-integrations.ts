@@ -55,14 +55,16 @@ type IntegrationStatus = {
   webhookUrl: string | null;
 };
 
-async function getLocalBridgeHealth() {
+async function getLocalBridgeHealth(profile?: IntegrationStatus["profile"]) {
   if (typeof window === "undefined") return null;
+
+  const localPort = profile?.slug === "musica-personalizada" ? 8081 : 8080;
 
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), 1800);
 
   try {
-    const response = await fetch("http://127.0.0.1:8080/health", {
+    const response = await fetch(`http://127.0.0.1:${localPort}/health`, {
       cache: "no-store",
       signal: controller.signal,
     });
@@ -77,6 +79,7 @@ async function getLocalBridgeHealth() {
       ownerJid?: string | null;
       hasWebhook?: boolean;
       instanceName?: string;
+      profileSlug?: string;
       lastError?: unknown;
     };
   } catch {
@@ -88,9 +91,12 @@ async function getLocalBridgeHealth() {
 
 async function getMergedIntegrationStatus() {
   const status = await request<IntegrationStatus>("/api/integrations/status");
-  const localBridge = await getLocalBridgeHealth();
+  const localBridge = await getLocalBridgeHealth(status.profile);
 
-  if (!localBridge?.connected || !status.profile?.usesSharedTransport) return status;
+  if (!localBridge?.connected) return status;
+  if (status.profile?.slug && localBridge.profileSlug && localBridge.profileSlug !== status.profile.slug) {
+    return status;
+  }
 
   const number = localBridge.ownerJid?.replace(/\D/g, "") || status.evolution.number;
 

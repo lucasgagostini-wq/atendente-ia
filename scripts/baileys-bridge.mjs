@@ -57,6 +57,7 @@ let starting = null;
 let manualStop = false;
 let pairingReadyAt = 0;
 let pairingReadyWaiters = [];
+let outboxSyncInFlight = false;
 const typingSessions = new Map();
 const leadActivityVersions = new Map();
 const bridgeOriginatedMessageIds = new Map();
@@ -69,6 +70,7 @@ const MEDIA_INITIAL_TYPING_MAX_MS = Number(process.env.MEDIA_INITIAL_TYPING_MAX_
 const SUPABASE_MEDIA_BUCKET = process.env.SUPABASE_MEDIA_BUCKET || "whatsapp-media";
 const INLINE_MEDIA_LIMIT_BYTES = Number(process.env.WEBHOOK_INLINE_MEDIA_LIMIT_BYTES || 300000);
 const OUTBOUND_MESSAGE_MEMORY_MS = Number(process.env.BRIDGE_OUTBOUND_MEMORY_MS || 10 * 60 * 1000);
+const OUTBOUND_JOB_POLL_MS = Number(process.env.OUTBOUND_JOB_POLL_MS || 2500);
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const supabaseServiceRole = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
 const supabaseAdmin =
@@ -144,6 +146,17 @@ function toJid(phone) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function resolveServerBaseUrl(value) {
+  if (!value) return null;
+
+  try {
+    const url = new URL(value);
+    return url.origin;
+  } catch {
+    return null;
+  }
 }
 
 function rememberBridgeOriginatedMessage(messageId) {
@@ -373,6 +386,91 @@ async function emitWebhook(payload) {
   } catch (error) {
     console.error("[baileys-bridge] webhook error:", error);
     return null;
+  }
+}
+
+async function bridgeApiFetch(pathname, init = {}) {
+  const serverBaseUrl = resolveServerBaseUrl(webhookUrl);
+  if (!serverBaseUrl) return null;
+
+  const headers = {
+    "Content-Type": "application/json",
+    ...(init.headers || {}),
+  };
+
+  if (webhookSecret) {
+    headers["X-Webhook-Secret"] = webhookSecret;
+  }
+
+  const response = await fetch(`${serverBaseUrl}${pathname}`, {
+    ...init,
+    headers,
+  });
+  const payload = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    throw new Error(
+      payload?.detail ||
+      payload?.error ||
+      `bridge api ${response.status} ${response.statusText}`,
+    );
+  }
+
+  return payload;
+}
+
+async function syncOutboundJobs() {
+  if (outboxSyncInFlight) return;
+  if (!socket || socketState !== "open") return;
+  if (!webhookUrl) return;
+
+  outboxSyncInFlight = true;
+
+  try {
+    const payload = await bridgeApiFetch("/api/bridge/outbox/claim", {
+      method: "POST",
+      body: JSON.stringify({
+        profileSlug,
+        instanceName,
+        limit: 3,
+      }),
+    });
+    const jobs = Array.isArray(payload?.jobs) ? payload.jobs : [];
+
+    for (const job of jobs) {
+      try {
+        const result = await socket.sendMessage(toJid(job.phone), { text: job.text });
+        rememberBridgeOriginatedMessage(result?.key?.id || null);
+
+        await bridgeApiFetch(`/api/bridge/outbox/${job.id}/status`, {
+          method: "POST",
+          body: JSON.stringify({
+            status: "SENT",
+            whatsappMessageId: result?.key?.id || null,
+            providerPayload: {
+              key: result?.key ?? null,
+              status: "PENDING",
+              serverId: result?.key?.id ?? null,
+            },
+          }),
+        });
+      } catch (error) {
+        await bridgeApiFetch(`/api/bridge/outbox/${job.id}/status`, {
+          method: "POST",
+          body: JSON.stringify({
+            status: "ERROR",
+            errorMessage:
+              error instanceof Error ? error.message : "failed to send via bridge",
+          }),
+        }).catch((statusError) => {
+          console.error("[bridge-outbox] failed to mark job error:", statusError);
+        });
+      }
+    }
+  } catch (error) {
+    console.error("[bridge-outbox] sync failed:", error);
+  } finally {
+    outboxSyncInFlight = false;
   }
 }
 
@@ -1077,6 +1175,11 @@ app.listen(port, async () => {
   if (webhookUrl) {
     console.log(`[baileys-bridge] webhook: ${webhookUrl}`);
   }
+  setInterval(() => {
+    syncOutboundJobs().catch((error) => {
+      console.error("[bridge-outbox] polling failed:", error);
+    });
+  }, OUTBOUND_JOB_POLL_MS).unref?.();
 
   if (usePairingCode) {
     // ── Modo pairing code ─────────────────────────────────────────────────────

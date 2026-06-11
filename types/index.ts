@@ -11,6 +11,7 @@ export type ConversationStatus = "OPEN" | "ARCHIVED" | "CLOSED";
 export type MessageDirection = "INBOUND" | "OUTBOUND";
 export type MessageRole = "LEAD" | "ASSISTANT" | "HUMAN" | "SYSTEM";
 export type MessageType = "TEXT" | "IMAGE" | "AUDIO";
+export type OutboundMessageJobStatus = "PENDING" | "PROCESSING" | "SENT" | "ERROR";
 export type MessageMediaKind = "TEXT" | "IMAGE" | "AUDIO" | "DOCUMENT" | "VIDEO" | "STICKER";
 export type ProspectingJobStatus = "QUEUED" | "RUNNING" | "COMPLETED" | "FAILED";
 export type ProfileStatus = "ACTIVE" | "PAUSED" | "AWAITING_WHATSAPP" | "DISCONNECTED";
@@ -71,6 +72,7 @@ export type Conversation = {
   updatedAt: string;
   lead?: Lead;
   messages?: Message[];
+  outboundMessageJobs?: OutboundMessageJob[];
 };
 
 export type Message = {
@@ -81,8 +83,28 @@ export type Message = {
   role: MessageRole;
   type: MessageType;
   content: string;
+  whatsappMessageId?: string | null;
   metadata?: MessageMetadata | null;
   createdAt: string;
+};
+
+export type OutboundMessageJob = {
+  id: string;
+  profileId: string;
+  leadId: string;
+  conversationId: string;
+  phone: string;
+  text: string;
+  status: OutboundMessageJobStatus;
+  transport: string;
+  attempts: number;
+  lastAttemptAt: string | null;
+  sentAt: string | null;
+  errorMessage: string | null;
+  whatsappMessageId: string | null;
+  providerPayload?: Record<string, unknown> | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
 export type Prompt = {

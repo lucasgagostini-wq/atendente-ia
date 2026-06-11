@@ -57,6 +57,13 @@ enum MessageType {
   AUDIO
 }
 
+enum OutboundMessageJobStatus {
+  PENDING
+  PROCESSING
+  SENT
+  ERROR
+}
+
 enum ProspectingJobStatus {
   QUEUED
   RUNNING
@@ -97,6 +104,7 @@ model Profile {
   createdAt           DateTime      @default(now())
   updatedAt           DateTime      @updatedAt
   leads               Lead[]
+  outboundMessageJobs OutboundMessageJob[]
   prompts             Prompt[]
 
   @@index([status])
@@ -135,6 +143,7 @@ model Lead {
   conversations  Conversation[]
   messages       Message[]
   leadTags       LeadTag[]
+  outboundMessageJobs OutboundMessageJob[]
   prospectingEntries ProspectingLead[] @relation("ImportedProspectingLead")
 
   @@unique([profileId, phone])
@@ -150,6 +159,7 @@ model Conversation {
   updatedAt DateTime           @updatedAt
   lead      Lead               @relation(fields: [leadId], references: [id], onDelete: Cascade)
   messages  Message[]
+  outboundMessageJobs OutboundMessageJob[]
 }
 
 model Message {
@@ -170,6 +180,32 @@ model Message {
 
   @@index([leadId, createdAt])
   @@index([whatsappMessageId])
+}
+
+model OutboundMessageJob {
+  id                String                   @id @default(cuid())
+  profileId         String
+  leadId            String
+  conversationId    String
+  phone             String
+  text              String
+  status            OutboundMessageJobStatus @default(PENDING)
+  transport         String                   @default("BAILEYS_BRIDGE_OUTBOX")
+  attempts          Int                      @default(0)
+  lastAttemptAt     DateTime?
+  sentAt            DateTime?
+  errorMessage      String?
+  whatsappMessageId String?
+  providerPayload   Json?
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+  profile           Profile                  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  lead              Lead                     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  conversation      Conversation             @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([profileId, status, createdAt])
+  @@index([conversationId, status, createdAt])
+  @@index([leadId, status, createdAt])
 }
 
 model Prompt {

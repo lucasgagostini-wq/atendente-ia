@@ -54,7 +54,7 @@ export async function GET(request: Request) {
     (envWebhookUrl && !isLocalWebhook(envWebhookUrl) ? envWebhookUrl : null) ||
     requestWebhookUrl;
 
-  const evolutionStatus = await evolutionService.getStatus();
+  const evolutionStatus = await evolutionService.getStatus(activeProfile);
   const evolutionConfigured = Boolean(
     evolutionApiUrl && evolutionApiKey && evolutionInstanceName,
   );

@@ -39,41 +39,43 @@ function KanbanCard({
       draggable
       onDragStart={() => onDragStart(lead.id)}
       onDragEnd={onDragEnd}
-      className="cursor-grab rounded-2xl border border-zinc-800/80 bg-zinc-950/70 p-3 shadow-[0_14px_35px_rgba(0,0,0,0.18)] transition hover:border-zinc-700 active:cursor-grabbing"
+      className="cursor-grab rounded-xl border border-zinc-800/80 bg-zinc-950/80 p-2.5 shadow-[0_10px_24px_rgba(0,0,0,0.16)] transition hover:border-zinc-700 active:cursor-grabbing"
     >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-zinc-100">
+          <p className="truncate text-xs font-semibold text-zinc-100">
             {lead.name || formatPhone(lead.phone)}
           </p>
-          <p className="mt-0.5 text-xs text-zinc-500">{formatPhone(lead.phone)}</p>
+          <p className="mt-0.5 truncate text-[11px] text-zinc-500">{formatPhone(lead.phone)}</p>
         </div>
         <Badge variant="info">{lead.funnelStage}</Badge>
       </div>
 
-      <div className="mt-3 flex flex-wrap gap-1.5">
+      <div className="mt-2 flex flex-wrap gap-1.5">
         <Badge variant="warning">Música Personalizada</Badge>
         <Badge variant="success">{lead.status}</Badge>
       </div>
 
-      <div className="mt-3 rounded-xl border border-zinc-800/80 bg-zinc-900/60 px-3 py-2">
-        <p className="truncate text-xs text-zinc-300">{lead.lastMessage || "Sem mensagem recente"}</p>
-        <p className="mt-1 text-[11px] text-zinc-500">
+      <div className="mt-2 rounded-lg border border-zinc-800/80 bg-zinc-900/60 px-2.5 py-2">
+        <p className="overflow-hidden text-[11px] leading-4 text-zinc-300 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2]">
+          {lead.lastMessage || "Sem mensagem recente"}
+        </p>
+        <p className="mt-1 text-[10px] text-zinc-500">
           {lead.lastMessageAt
             ? `${formatRelativeConversationTime(lead.lastMessageAt, Date.now())} · ${new Date(lead.lastMessageAt).toLocaleString("pt-BR")}`
             : new Date(lead.updatedAt).toLocaleString("pt-BR")}
         </p>
       </div>
 
-      <div className="mt-3 flex items-center justify-between gap-3">
+      <div className="mt-2 flex items-center justify-between gap-3">
         <Link
           href={conversationHref}
-          className="inline-flex items-center gap-1.5 text-xs font-medium text-indigo-400 transition hover:text-indigo-300"
+          className="inline-flex items-center gap-1.5 text-[11px] font-medium text-indigo-400 transition hover:text-indigo-300"
         >
           <MessageCircle className="size-3.5" />
           Abrir conversa
         </Link>
-        <span className="inline-flex items-center gap-1 text-[11px] text-zinc-500">
+        <span className="inline-flex items-center gap-1 text-[10px] text-zinc-500">
           Arraste
           <MoveRight className="size-3" />
         </span>
@@ -111,27 +113,27 @@ function KanbanColumn({
         event.preventDefault();
         onDropLead(stage);
       }}
-      className={`flex min-h-[640px] min-w-[320px] flex-1 flex-col rounded-[28px] border px-4 py-4 transition ${
+      className={`flex min-h-0 min-w-0 flex-col overflow-hidden rounded-2xl border transition ${
         isOver
           ? "border-amber-400/70 bg-amber-500/8"
           : "border-zinc-800/80 bg-zinc-900/55"
       }`}
     >
-      <div className="mb-4 flex items-center justify-between gap-3">
+      <div className="sticky top-0 z-10 flex items-center justify-between gap-3 border-b border-zinc-800/80 bg-zinc-900/95 px-3 py-2 backdrop-blur">
         <div>
-          <h2 className="text-sm font-semibold text-zinc-100">
+          <h2 className="text-xs font-semibold text-zinc-100">
             {MUSIC_OPERATION_STAGE_LABELS[stage]}
           </h2>
-          <p className="mt-0.5 text-xs text-zinc-500">
+          <p className="mt-0.5 text-[11px] text-zinc-500">
             {leads.length === 1 ? "1 pedido" : `${leads.length} pedidos`}
           </p>
         </div>
         <Badge variant="default">{leads.length}</Badge>
       </div>
 
-      <div className="flex flex-1 flex-col gap-3">
+      <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-3">
         {leads.length === 0 && (
-          <div className="flex flex-1 items-center justify-center rounded-2xl border border-dashed border-zinc-800 bg-zinc-950/30 px-4 text-center text-sm text-zinc-500">
+          <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-zinc-800 bg-zinc-950/30 px-3 text-center text-xs text-zinc-500">
             Nenhum pedido aqui
           </div>
         )}
@@ -217,8 +219,8 @@ export default function KanbanPage() {
   }
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
+    <div className="flex h-[calc(100vh-176px)] flex-col gap-4 overflow-hidden">
+      <div className="flex flex-none flex-wrap items-center justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
             <Columns3 className="size-5 text-amber-400" />
@@ -235,13 +237,13 @@ export default function KanbanPage() {
       </div>
 
       {isLoading ? (
-        <Card>
+        <Card className="flex-1">
           <CardContent className="py-10 text-center text-sm text-zinc-500">
             Carregando Kanban...
           </CardContent>
         </Card>
       ) : leads.length === 0 ? (
-        <Card>
+        <Card className="flex-1">
           <CardHeader>
             <CardTitle>Nenhum pedido ainda</CardTitle>
           </CardHeader>
@@ -250,8 +252,8 @@ export default function KanbanPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="overflow-x-auto pb-2">
-          <div className="flex min-w-max gap-4">
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <div className="grid h-full min-h-0 grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-6">
             {MUSIC_OPERATION_STAGE_ORDER.map((stage) => (
               <KanbanColumn
                 key={stage}

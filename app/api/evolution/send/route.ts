@@ -4,6 +4,7 @@ import { evolutionSendSchema } from "@/lib/validations";
 import { conversationService } from "@/services/conversation.service";
 import { evolutionService } from "@/services/evolution.service";
 import { leadService } from "@/services/lead.service";
+import { outboundMessageService } from "@/services/outbound-message.service";
 import { profileService } from "@/services/profile.service";
 
 export const dynamic = "force-dynamic";
@@ -40,25 +41,50 @@ export async function POST(request: Request) {
       lead.id,
     );
 
-    const sent = await evolutionService.sendTextStrict(lead.phone, parsed.data.text);
+    try {
+      const sent = await evolutionService.sendTextForProfile(
+        activeProfile,
+        lead.phone,
+        parsed.data.text,
+      );
 
-    await conversationService.saveMessage({
-      conversationId: conversation.id,
-      leadId: lead.id,
-      direction: "OUTBOUND",
-      role: "HUMAN",
-      type: "TEXT",
-      content: parsed.data.text,
-      whatsappMessageId:
-        typeof sent?.key?.id === "string"
-          ? sent.key.id
-          : typeof sent?.serverId === "string"
-            ? sent.serverId
-            : null,
-      metadata: sent,
-    });
+      await conversationService.saveMessage({
+        conversationId: conversation.id,
+        leadId: lead.id,
+        direction: "OUTBOUND",
+        role: "HUMAN",
+        type: "TEXT",
+        content: parsed.data.text,
+        whatsappMessageId:
+          typeof sent?.key?.id === "string"
+            ? sent.key.id
+            : typeof sent?.serverId === "string"
+              ? sent.serverId
+              : null,
+        metadata: sent,
+      });
 
-    return NextResponse.json({ ok: true, sent });
+      return NextResponse.json({ ok: true, mode: "direct", sent });
+    } catch (transportError) {
+      const job = await outboundMessageService.enqueueManualMessage({
+        profileId: activeProfile.id,
+        leadId: lead.id,
+        conversationId: conversation.id,
+        phone: lead.phone,
+        text: parsed.data.text,
+      });
+
+      return NextResponse.json({
+        ok: true,
+        mode: "outbox",
+        queued: true,
+        job,
+        warning:
+          transportError instanceof Error
+            ? transportError.message
+            : "Transporte direto indisponível; mensagem enviada para a fila da bridge.",
+      });
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : "erro desconhecido";
 

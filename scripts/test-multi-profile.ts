@@ -4,6 +4,7 @@ import { DEFAULT_PROFILE_SLUG, MUSIC_PROFILE_SLUG } from "@/lib/profile-defaults
 import { buildProfileHref } from "@/lib/profile-utils";
 import { conversationService } from "@/services/conversation.service";
 import { leadService } from "@/services/lead.service";
+import { outboundMessageService } from "@/services/outbound-message.service";
 import { profileService } from "@/services/profile.service";
 import { promptService } from "@/services/prompt.service";
 
@@ -109,6 +110,76 @@ async function main() {
       operationStage: "PRODUCTION",
     });
     assert.equal(movedMusicLead.operationStage, "PRODUCTION");
+
+    const manualConversation = await conversationService.getOrCreateOpenConversation(musicLead.id);
+    const queuedJob = await outboundMessageService.enqueueManualMessage({
+      profileId: music.id,
+      leadId: musicLead.id,
+      conversationId: manualConversation.id,
+      phone: musicLead.phone,
+      text: "Mensagem manual operacional",
+    });
+    assert.equal(queuedJob.status, "PENDING");
+
+    const claimedForMusic = await outboundMessageService.claimPendingJobs({
+      profileId: music.id,
+      limit: 5,
+    });
+    assert.ok(
+      claimedForMusic.some((job) => job.id === queuedJob.id),
+      "job da música deve ser reivindicado pela bridge do perfil música",
+    );
+
+    const claimedForRestoration = await outboundMessageService.claimPendingJobs({
+      profileId: restoration.id,
+      limit: 5,
+    });
+    assert.equal(
+      claimedForRestoration.some((job) => job.id === queuedJob.id),
+      false,
+      "job da música não pode aparecer no perfil restauração",
+    );
+
+    await outboundMessageService.markJobSent({
+      jobId: queuedJob.id,
+      whatsappMessageId: `wamid-${now}`,
+      providerPayload: { transport: "test" },
+    });
+
+    const manualConversationAfterSend = await conversationService.getConversationById(
+      manualConversation.id,
+      music.id,
+    );
+    const sentManualMessage = manualConversationAfterSend?.messages.find(
+      (message) => message.whatsappMessageId === `wamid-${now}`,
+    );
+    assert.ok(sentManualMessage, "mensagem manual enviada deve ser salva na conversa");
+    assert.equal(sentManualMessage?.role, "HUMAN");
+    assert.equal(sentManualMessage?.direction, "OUTBOUND");
+
+    const updatedManualLead = await leadService.getLeadById(musicLead.id, music.id);
+    assert.equal(updatedManualLead?.lastMessage, "Mensagem manual operacional");
+    assert.ok(updatedManualLead?.lastMessageAt, "última interação deve ser atualizada após envio manual");
+    assert.equal(updatedManualLead?.aiEnabled, false, "envio manual não deve ativar IA");
+    assert.equal(updatedManualLead?.operationStage, "PRODUCTION", "envio manual não deve alterar estágio operacional");
+
+    const failedJob = await outboundMessageService.enqueueManualMessage({
+      profileId: music.id,
+      leadId: musicLead.id,
+      conversationId: manualConversation.id,
+      phone: musicLead.phone,
+      text: "Mensagem com falha controlada",
+    });
+    await outboundMessageService.claimPendingJobs({
+      profileId: music.id,
+      limit: 5,
+    });
+    const failedJobResult = await outboundMessageService.markJobError({
+      jobId: failedJob.id,
+      errorMessage: "bridge offline",
+    });
+    assert.equal(failedJobResult.status, "ERROR");
+    assert.equal(failedJobResult.errorMessage, "bridge offline");
 
     await assert.rejects(
       () =>

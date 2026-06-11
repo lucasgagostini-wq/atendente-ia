@@ -68,6 +68,14 @@ class ConversationService {
           orderBy: { createdAt: "desc" },
           take: 1,
         },
+        outboundMessageJobs: {
+          where: {
+            status: {
+              in: ["PENDING", "PROCESSING", "ERROR"],
+            },
+          },
+          orderBy: { createdAt: "asc" },
+        },
       },
       orderBy: { updatedAt: "desc" },
       take: filters.limit ?? 50,
@@ -97,6 +105,14 @@ class ConversationService {
           },
         },
         messages: {
+          orderBy: { createdAt: "asc" },
+        },
+        outboundMessageJobs: {
+          where: {
+            status: {
+              in: ["PENDING", "PROCESSING", "ERROR"],
+            },
+          },
           orderBy: { createdAt: "asc" },
         },
       },

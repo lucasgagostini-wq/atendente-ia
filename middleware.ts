@@ -7,6 +7,7 @@ const publicPaths = [
   "/api/auth/login",
   "/api/auth/logout",
   "/api/auth/setup",
+  "/api/bridge/outbox",
   "/api/webhooks/evolution",
 ];
 

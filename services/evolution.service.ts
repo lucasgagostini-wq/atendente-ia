@@ -2,6 +2,7 @@ import axios, { AxiosInstance } from "axios";
 import { getSettings } from "@/lib/settings-cache";
 import { prisma } from "@/lib/prisma";
 import { TYPING_BUFFER_MS } from "@/lib/typing-delay";
+import type { Profile } from "@prisma/client";
 
 type SendMediaPayload = {
   phone: string;
@@ -11,6 +12,7 @@ type SendMediaPayload = {
 
 type SendOptions = {
   allowSimulation?: boolean;
+  instanceName?: string | null;
 };
 
 const typingSessions = new Map<string, ReturnType<typeof setTimeout>>();
@@ -31,14 +33,15 @@ function resolveServiceUrl(settingsUrl?: string | null) {
 }
 
 class EvolutionService {
-
-
-  private async getClient(timeout = 15_000) {
+  private async getClient(timeout = 15_000, options?: { instanceName?: string | null }) {
     const settings = await getSettings();
     const baseURL = resolveServiceUrl(settings.evolutionApiUrl);
     const apiKey = settings.evolutionApiKey || process.env.EVOLUTION_API_KEY || "";
     const instance =
-      settings.evolutionInstanceName || process.env.EVOLUTION_INSTANCE_NAME || "";
+      options?.instanceName?.trim() ||
+      settings.evolutionInstanceName ||
+      process.env.EVOLUTION_INSTANCE_NAME ||
+      "";
 
     if (!baseURL || !apiKey || !instance) {
       return {
@@ -60,8 +63,10 @@ class EvolutionService {
     return { client, instance, isConfigured: true };
   }
 
-  async getStatus() {
-    const { client, instance, isConfigured } = await this.getClient(4_000);
+  async getStatus(profile?: Pick<Profile, "whatsappSessionName"> | null) {
+    const { client, instance, isConfigured } = await this.getClient(4_000, {
+      instanceName: profile?.whatsappSessionName ?? null,
+    });
 
     if (!isConfigured || !client) {
       return {
@@ -247,7 +252,9 @@ class EvolutionService {
     text: string,
     options?: SendOptions,
   ) {
-    const { client, instance, isConfigured } = await this.getClient();
+    const { client, instance, isConfigured } = await this.getClient(15_000, {
+      instanceName: options?.instanceName ?? null,
+    });
     if (!isConfigured || !client) {
       const allowSimulation =
         options?.allowSimulation ?? process.env.NODE_ENV !== "production";
@@ -277,6 +284,13 @@ class EvolutionService {
 
   async sendTextStrict(phone: string, text: string) {
     return this.sendTextWithOptions(phone, text, { allowSimulation: false });
+  }
+
+  async sendTextForProfile(profile: Pick<Profile, "whatsappSessionName">, phone: string, text: string) {
+    return this.sendTextWithOptions(phone, text, {
+      allowSimulation: false,
+      instanceName: profile.whatsappSessionName,
+    });
   }
 
   async sendImage(payload: SendMediaPayload, options?: SendOptions) {

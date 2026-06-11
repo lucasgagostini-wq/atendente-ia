@@ -95,6 +95,26 @@ export const evolutionSendSchema = z.object({
   text: z.string().min(1),
 });
 
+export const outboundMessageJobStatusSchema = z.enum([
+  "PENDING",
+  "PROCESSING",
+  "SENT",
+  "ERROR",
+]);
+
+export const bridgeOutboxClaimSchema = z.object({
+  profileSlug: z.string().min(2),
+  instanceName: z.string().optional().or(z.literal("")),
+  limit: z.number().int().min(1).max(10).optional(),
+});
+
+export const bridgeOutboxStatusSchema = z.object({
+  status: z.enum(["SENT", "ERROR"]),
+  whatsappMessageId: z.string().optional().nullable(),
+  errorMessage: z.string().optional().nullable(),
+  providerPayload: z.record(z.string(), z.any()).optional().nullable(),
+});
+
 export const tagSchema = z.object({
   name: z.string().trim().min(2).max(40),
   color: z
